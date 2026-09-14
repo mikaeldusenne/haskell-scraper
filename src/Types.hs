@@ -11,20 +11,28 @@ import System.FilePath
 import Text.HTML.TagSoup (Tag (..))
 import Text.Read (readMaybe)
 
+-- | An HTTP(S) URL or a reference resolved against a containing page.
 type URLString = String
+-- | A local filesystem path.
 type Path = FilePath
+-- | Completed downloads: canonical URL and path relative to the output root.
 type Cache = [(URLString, Path)]
+-- | IO with the configuration, cookie jar and download cache of one crawl.
 type PPM a = StateT Config IO a
+-- | A node's URL/context and error message, or success.
 type ErrorDetails = Either (String, String) ()
 -- | Return child URLs and paths relative to this node; a leaf returns @Right []@.
 type Stage = UrlWithDest -> PPM (Either String [UrlWithDest])
 
+-- | A page and its output directory; child destinations are relative to parents.
 data UrlWithDest = UrlWithDest {url :: URLString, dest :: FilePath}
   deriving (Eq, Show)
 
+-- | Empty starting values for callers constructing their own nodes.
 defaultUrlWithDest :: UrlWithDest
 defaultUrlWithDest = UrlWithDest "" ""
 
+-- | Runtime settings and session state. Override fields of 'defaultconfig'.
 data Config = Config
   { download_folder :: Path
   , base :: URLString
@@ -82,6 +90,7 @@ readCache = traverse parse . zip [1 :: Int ..] . lines
   where
     parse (n, line) = maybe (Left ("Invalid cache record at line " ++ show n)) Right (readMaybe line)
 
+-- | Load the cache under the crawl lock; malformed records raise an IO error.
 loadCache :: Config -> IO Config
 loadCache cfg = do
   let path = download_folder cfg </> urlsfile cfg
@@ -90,5 +99,6 @@ loadCache cfg = do
   cache <- either (ioError . userError) pure (readCache records)
   pure cfg {alreadies_urls = cache}
 
+-- | Find a recorded path. 'Scrapper.download' checks that the file still exists.
 handle_url_cache :: URLString -> PPM (Maybe Path)
 handle_url_cache target = gets (lookup target . alreadies_urls)

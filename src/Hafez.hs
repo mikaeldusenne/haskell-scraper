@@ -25,6 +25,7 @@ extractLinks parent tags = do
     address <- resolveURL parent ref
     pure (UrlWithDest address (url_basename address))) refs
 
+-- | Fetch an index and return the links selected by 'extractLinks'.
 findlinks :: Stage
 findlinks node = do
   result <- extracturl (url node)
@@ -50,6 +51,7 @@ parsePoem tags = do
     render (TagBranch _ _ children) = concatMap render children
     render _ = ""
 
+-- | Save English, Farsi and source URL as UTF-8 files; preserve existing content.
 genPoem :: Stage
 genPoem node = runExceptT $ do
   tags <- ExceptT (extracturl (url node))
@@ -60,11 +62,13 @@ genPoem node = runExceptT $ do
     [("en.txt", english), ("fa.txt", farsi), ("source.txt", url node ++ "\n")]
   pure []
 
+-- | Initialize the Hafez output directory with the default HTTPS source.
 mkcfg :: IO Config
 mkcfg = createConfig defaultconfig
   { download_folder = "hafez_downloads"
   , base = "https://www.hafizonlove.com/divan/"
   }
 
+-- | Group index, ghazal index, then bilingual text extraction.
 fs :: [Stage]
 fs = [findlinks, findlinks, genPoem]
