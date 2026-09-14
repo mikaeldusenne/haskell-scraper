@@ -9,6 +9,10 @@ description: See the README at <https://github.com/mikaeldusenne/haskell-scraper
 
 extra-source-files:
 - README.md
+- CHANGELOG.md
+- docs/*.md
+- examples/*.hs
+- scripts/*.sh
 - test/fixtures/**/*
 - test/smoke.py
 
