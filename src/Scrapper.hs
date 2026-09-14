@@ -1,255 +1,182 @@
-{-# LANGUAGE LambdaCase #-}
+-- | Run a finite tree of extraction stages, preserving successful work on disk.
 module Scrapper where
 
-import qualified Data.ByteString as BS
-import List
-
-import Data.List (isPrefixOf, isSuffixOf)
-import Data.Char(toLower)
-import Network.Curl
-import Network.Curl.Download
-import Text.HTML.TagSoup
-import qualified Data.Text as T (pack, replace, unpack)
-import System.Directory
-import System.IO
-import System.FilePath.Posix ((</>), joinPath, splitPath)
-
-import Misc (applyIf, alpha_num, ifm, joinPaths)
-import Tuple
-import System.Environment (getEnv, getArgs)
-import Control.Monad (when, foldM_)
-import Control.Concurrent (threadDelay)
-import System.Posix.Files
-import Data.Digest.Pure.SHA
-import qualified Data.ByteString.Lazy as LB
-import System.IO.Temp
-import Control.Monad.Zip
-import System.IO.Error
--- import Control.Monad.Trans.Either
-
-import List (splitOn)
-import Types
-import Control.Monad.Trans.State (gets, put, get, StateT, runStateT)
+import Control.Exception (bracket_)
+import Control.Monad (unless, when)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad (liftM)
-import Helpers (retry, openURL, mkurl)
-import qualified Secrets
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Except (ExceptT (..), runExceptT, throwE)
+import Control.Monad.Trans.State.Strict (StateT (..), get, gets, modify', runStateT)
+import Data.Bifunctor (first)
+import qualified Data.ByteString as BS
+import Data.Either (isRight)
+import Data.List (isPrefixOf, nub)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
+import qualified Network.HTTP.Client as HTTP
+import System.Directory
+import System.Environment (lookupEnv)
+import System.FilePath
+import System.IO
+import System.IO.Error (tryIOError)
+import Text.HTML.TagSoup
+import Helpers
+import Types
 
-cookiefilepath = "cookies"
+-- | Submit form credentials from the configured environment variables once.
+login :: PPM (Either String ())
+login = runExceptT $ do
+  cfg <- lift get
+  case login_path cfg of
+    Nothing -> pure ()
+    Just path -> do
+      let credential key = do
+            value <- liftIO $ lookupEnv (login_env_prefix cfg ++ key)
+            maybe (throwE ("Missing environment variable: " ++ login_env_prefix cfg ++ key)) pure value
+      username <- credential "LOGIN"
+      password <- credential "PASS"
+      ExceptT $ request path (Just [(login_arg_login cfg, username), (login_arg_pass cfg, password)]) (\reader -> HTTP.brConsume reader >> pure ())
 
-login :: [String] -> PPM ()
-login [login, pass] = do
-  b <- gets base
-  Just lp <- gets login_path
-  logk <- gets login_arg_login
-  passk <- gets login_arg_pass
-  liftIO $ curlPost (b </> lp) [logk++"="++login, passk++"="++pass]
+-- | Select elements whose whitespace-separated class list contains the class.
+tag_class_f :: String -> String -> (Tag String -> a) -> [Tag String] -> [a]
+tag_class_f tag cls f = map f . filter (\t -> t ~== TagOpen tag [] && cls `elem` words (fromAttrib "class" t))
 
-login' = login [Secrets.login, Secrets.pass] -- do
-  -- prefix <- gets login_env_prefix
-  -- liftIO (mapM (getEnv . (prefix++)) ["LOGIN", "PASS"]) >>= login
- 
+extracturl :: URLString -> PPM (Either String [Tag String])
+extracturl target = do
+  result <- fmap (canonicalizeTags . parseTags) <$> openURL target
+  marker <- gets login_needed_tag
+  pure $ result >>= \tags -> if any (~== marker) tags
+    then Left "Login page received; check credentials and the site's login flow"
+    else Right tags
 
--- tag_class_f t cl f = map f . filter (~== TagOpen t [("class", cl)])
--- apply f to all tags `t` with class `cl`
-tag_class_f ::
-  String -> String -> (Tag [Char] -> b) -> [Tag [Char]] -> [b]
-tag_class_f t cl f = map f . filter ((cl `elem`) . words . fromAttrib "class") . filter (~== TagOpen t [])
+-- | Stream a body instead of retaining a whole download in memory.
+copyBody :: HTTP.BodyReader -> Handle -> IO ()
+copyBody reader output = do
+  chunk <- reader
+  unless (BS.null chunk) $ BS.hPut output chunk >> copyBody reader output
 
+copyHandle :: Handle -> Handle -> IO ()
+copyHandle input = copyBody (BS.hGetSome input 32768)
 
-
-
-url_remove_parameters = reduce (</>)  . takeWhile (not . (isPrefixOf "?")) . splitPath
-url_basename = last . takeWhile (not . (isPrefixOf "?")) . splitPath
-
-pathdiff a b = reduce (</>) $ take (length a' - 1) (repeat "..") ++ a'
-  where (same, a') = applyToSnd (map fst) . span (\(a,b) -> a==b) . uncurry zip . applyToTuple splitPath $ (a, b)
-
+-- | Download or copy a known cached URL, then record success. Existing unknown
+-- files and symlinks are never replaced. Call within 'mainLoop' for its lock.
 download :: UrlWithDest -> PPM (Either String ())
-download UrlWithDest{url=url, dest=dest} =
-  do
-    url' <- mkurl url
-    dldir <- gets download_folder
-    cfg <- get
-    tmp <- liftIO $ emptyTempFile dldir "tmpdownload"
-
-    liftIO $ do
-      putStrLn url'
-      threadDelay (2*10^5)
-      (openURIWithOpts [CurlFollowLocation True, CurlCookieFile cookiefilepath] url') >>= (
-        \case
-          Right bs -> (Right<$>) (BS.writeFile tmp bs >> renamePath tmp dest)
-          Left e -> doesPathExist tmp >>= (`when` removeFile tmp) >> (return $ Left e)
-        )
-    
-downloader :: ([[Tag String] -> [URLString]]) -> FilePath -> UrlWithDest -> PPM (Either String ())
-downloader linkgenerators dldir p@UrlWithDest{url=url, dest=dest'} = do
-  -- let dest = reduce (</>) $ dldir:p
-  let dest = dldir </> dest'
-  logtag <- gets login_needed_tag
-  liftIO $ do
-    putStr dest
-    createDirectoryIfMissing True $ dest
-  
-    putStrLn " Download..."
-    putStrLn $ nice'title url
-    
-  -- tags <- parseTags <$> openURL (Just cookiefilepath) url
-  tags <- extracturl url
-  
-  let links :: [String]
-      links = (filter ((>0) . length)) . flatten . map ($tags) $ linkgenerators
-  let process e = do
-        let destpath = dest </> fix (url_basename e)
-              where fix x | isSuffixOf "/" x = init x ++ ".html"
-                          | otherwise = x
-
-        -- liftIO $ putStrLn $ "{process} " ++ e ++ " ==@ " ++ destpath
-
-        pathok <- liftIO $ doesPathExist destpath
-    
-        issym <- liftIO $ pathIsSymbolicLink destpath `catchIOError` (\_ -> return False)
-    
-        let fix_symlink = do
-              liftIO$ putStrLn "bad symlink, fixing..."
-              target <- liftIO$ getSymbolicLinkTarget destpath
-              liftIO$ putStrLn $ "old target is: " ++ target
-              let target' = joinPath . tail . splitPath $ target
-              liftIO$ removeFile destpath
-              
-              ifm (liftIO$ doesPathExist target')
-                (do
-                    liftIO$do
-                      putStrLn $ "new target is: " ++ target'
-                      createSymbolicLink target' destpath
-                    return (Right ())
-                )
-                (do
-                    liftIO$ putStrLn $ target' ++ " does not exist either. deleting symlink"
-                    download UrlWithDest{url=url, dest=destpath}
-                )
-        let download_or_cache :: StateT Config IO (Either String ())
-            download_or_cache = do
-              handle_url_cache e >>= (
-                \case 
-                  Nothing -> download UrlWithDest{url=e, dest=destpath} >> do
-                    cfg <- get
-                    urls <- gets alreadies_urls
-                    -- liftIO . putStrLn $ "adding " ++ e ++ " to the FUCKING list"
-                    put (cfg{ alreadies_urls = append (e, destpath) urls})
-                    liftIO . (`appendFile` (show (e, destpath) ++ "\n")) $ download_folder cfg </> urlsfile cfg
-                    return $ Right ()
-                  Just originalpath -> do
-                    if destpath == originalpath
-                      then (do
-                      liftIO $ putStrLn $ "warning: original and dest are the same. fixing."
-                      cfg <- get
-                      put $ cfg{ alreadies_urls=filter (not . (==destpath) . snd) $ alreadies_urls cfg }
-                      download_or_cache)
-                      else do
-                      liftIO $ do
-                      -- print $ "wtf WTH" ++ originalpath
-                        
-                        putStrLn $ "Symlink " ++ destpath ++ " --> " ++ originalpath
-                        createSymbolicLink (pathdiff originalpath destpath) destpath
-                      return $ Right ()
-                )
-              
-        
-        if (pathok || issym)
-          then do
-          liftIO$ putStrLn $ " skipping, path exists."
-          if (issym && not pathok)
-            then fix_symlink
-            else return (Right ())
-          else download_or_cache
-  
-      
-  if (length links > 0)
-    then (((reduce (>>))<$>) $ mapM process links) >> process url
+download node = runExceptT $ do
+  address <- ExceptT (mkurl (url node))
+  cfg <- lift get
+  let root = download_folder cfg
+      path = dest node
+      relative = makeRelative root path
+      io = ExceptT . liftIO . ioEither
+  io $ checkOutput root path
+  exists <- io $ doesPathExist path
+  if exists
+    then unless ((address, relative) `elem` alreadies_urls cfg) $
+      throwE ("Refusing existing untracked file: " ++ path)
     else do
-      if ((>0) . length . filter (~== logtag) $ tags)
-        then do
-          liftIO $ putStrLn "Re-logging-in..."
-          login'
-          downloader linkgenerators dldir p
-        else do
-        let errmsg = "error: nothing to download in " ++ url
-        -- liftIO $ print tags >> (putStrLn $ "error: nothing to download in " ++ url3)
-        return (Left errmsg)
+      io $ createDirectoryIfMissing True (takeDirectory path)
+      cached <- lift $ handle_url_cache address
+      source <- case cached of
+        Nothing -> pure Nothing
+        Just saved -> do
+          let original = root </> saved
+          io $ checkOutput root original
+          present <- io $ doesFileExist original
+          pure (if present then Just original else Nothing)
+      case source of
+        Just original -> io $ withBinaryFile original ReadMode $ \input -> atomicWrite path (copyHandle input)
+        Nothing -> ExceptT $ request address Nothing (\reader -> atomicWrite path (copyBody reader))
+      -- Append only after the completed file is in place.
+      io $ BS.appendFile (root </> urlsfile cfg) (T.encodeUtf8 (T.pack (show (address, relative) ++ "\n")))
+      lift $ modify' (\state -> state {alreadies_urls = (address, relative) : alreadies_urls state})
 
+-- | Download selected links relative to their containing page, plus that page.
+-- Use an empty second argument when adapting this helper into a stage.
+downloader :: [[Tag String] -> [URLString]] -> FilePath -> UrlWithDest -> PPM (Either String ())
+downloader generators directory node = runExceptT $ do
+  page <- ExceptT (mkurl (url node))
+  tags <- ExceptT (extracturl page)
+  let links = nub (filter (not . null) (concatMap ($ tags) generators))
+      output = directory </> dest node
+  when (null links) $ throwE "No download links found; check the selectors"
+  addresses <- either throwE pure (traverse (resolveURL page) (links ++ [page]))
+  unless (length (nub (map url_basename addresses)) == length (nub addresses)) $
+    throwE "Different URLs map to the same filename; use explicit destinations with download"
+  mapM_ (\address -> ExceptT (download (UrlWithDest address (output </> url_basename address)))) addresses
 
+-- | Resolve children and reject ambiguous or escaping destination paths.
+prepareChildren :: UrlWithDest -> [UrlWithDest] -> Either String [UrlWithDest]
+prepareChildren parent children = do
+  resolved <- nub <$> traverse prepare children
+  unless (length (nub (map dest resolved)) == length resolved) $ Left "Duplicate child destination"
+  pure resolved
+  where
+    prepare child = do
+      unless (safeRelative (dest child) && normalise (dest child) /= "."
+              && not (any (".scraper-" `isPrefixOf`) (splitDirectories (dest child)))) $
+        Left ("Unsafe child destination: " ++ dest child)
+      address <- resolveURL (url parent) (url child)
+      pure child {url = address, dest = dest parent </> normalise (dest child)}
 
+attempt :: Stage -> Stage
+attempt stage node = StateT $ \cfg -> do
+  result <- tryIOError (runStateT (stage node) cfg)
+  pure $ either (\err -> (Left (show err), cfg)) id result
 
-ff :: UrlWithDest -> [UrlWithDest -> PPM (Either String [UrlWithDest])] -> PPM [Either (String, String) ()]
-ff _ [] = return $ [Right ()]
-ff x@UrlWithDest{dest=path, url=url} (fm:fms) = do
-  let finishedpath = path </> "finished"
-  
-  alreadyDone <- liftIO $ fileExist finishedpath
-  if alreadyDone
-    
-    then do
-    liftIO $ putStrLn $ path ++ " has already been downloaded."
-    return $ [Right ()]
-    
-    else do
-      next <- retry 2 (show x) (fm x)
-      
-      let prependPath UrlWithDest{url=url, dest=dest} = UrlWithDest{url=url, dest=path</>dest}
-      
-      case next of
-        Left e -> return $ [Left e]
-        Right n -> do
-          let n' :: [UrlWithDest]
-              n' = map prependPath n
-          -- let n' = applyToFst (`append` paths) n
-          ans <- flatten <$> mapM (`ff` fms) n'
-          -- liftIO $ putStrLn $ "*** Finished <"++ path ++"> ***"
-          liftIO $ writeFile finishedpath ""
-          return ans
-      
+-- | A node is finished only after its stage and all descendants succeed.
+ff :: UrlWithDest -> [Stage] -> PPM [ErrorDetails]
+ff _ [] = pure []
+ff node (stage : rest) = do
+  outcome <- runExceptT $ do
+    cfg <- lift get
+    let directory = dest node
+        marker = directory </> ".scraper-finished"
+        identity = T.encodeUtf8 (T.pack (show (url node, length rest)))
+        io = ExceptT . liftIO . ioEither
+    io $ checkOutput (download_folder cfg) directory
+    io $ createDirectoryIfMissing True directory
+    io $ checkOutput (download_folder cfg) marker
+    done <- io $ doesFileExist marker
+    if done
+      then do
+        previous <- io $ BS.readFile marker
+        unless (previous == identity) $ throwE "Completion marker belongs to a different URL or pipeline; choose a new output directory"
+        pure []
+      else do
+        children <- ExceptT $ first snd <$> retry (retry_count cfg) (url node) (attempt stage node)
+        when (null children && not (null rest)) $ throwE "No child links found before the final stage"
+        when (not (null children) && null rest) $ throwE "Final stage returned unprocessed child links"
+        next <- either throwE pure (prepareChildren node children)
+        answers <- lift $ concat <$> mapM (`ff` rest) next
+        when (all isRight answers) $ io $ writeOutput (download_folder cfg) marker identity
+        pure answers
+  pure (either (\err -> [Left (url node, err)]) id outcome)
 
--- takes a `url`, curl it and parse tags
-extracturl :: URLString -> PPM [Tag String]
--- extracturl u = liftIO (threadDelay (10^5)) >> parseTags <$> openURL (Just cookiefilepath) u
-extracturl u = do
-  liftIO (threadDelay (10^5))
-  Right result <- (retry 3 ("openurl " ++ u) $ openURL (Just cookiefilepath) u)
-  return $ parseTags result
-
-
--- findlinks = takeWhile (~== "<li>") . dropWhile (~/= "<li>") . dropWhile (~/= "<div class=linklist>")
-
-pretty :: Show a => [a] -> String
-pretty l = unlines . map show $ l
-
-
-mainLoop :: Config -> [UrlWithDest -> PPM (Either String [UrlWithDest])] -> IO ()
-mainLoop cfg fs = do
-  let isNothing Nothing = True
-      isNothing _ = False
-      
-      -- run :: PPM [Either String ()]
-      run = do
-        login_path' <- gets login_path
-        when (not . isNothing $ login_path') login'
-
-        -- let -- start :: [T]
-            -- start = map (\e -> UrlWithDest{url=e, dest="lesson-library" </> e}) l
-            -- fs :: [T -> T']
-        -- reduce (++) <$> mapM (`ff` fs) [defaultUrlWithDest]
-        dld <- gets download_folder
-        ff defaultUrlWithDest{dest=dld} fs 
-
-        
-  status <- runStateT run cfg
-  putStrLn "---------------------------------"
-  putStrLn "errors:"
-  (`mapM` fst status) (\e -> case e of
-                         Right () -> return ()
-                         Left err -> do
-                           -- putStrLn $ boxify (fst err) [snd err]
-                           putStrLn $ show ((fst err), [snd err])
-                      )
-  putStrLn "ok"
+-- | Run one crawl per directory. Return False on any error; leave successful
+-- subtrees intact for the next invocation. The CLI maps False to exit status 1.
+mainLoop :: Config -> [Stage] -> IO Bool
+mainLoop config stages = do
+  result <- ioEither $ do
+    cfg <- createConfig config
+    address <- either (ioError . userError) pure (resolveURL (base cfg) "")
+    when (null stages) $ ioError (userError "The pipeline has no stages")
+    let root = download_folder cfg
+        lock = root </> ".scraper-lock"
+    checkOutput root lock
+    bracket_ (createDirectory lock) (removeDirectory lock) $ do
+      checkOutput root (root </> urlsfile cfg)
+      writeOutput root (root </> ".scraper-source") (T.encodeUtf8 (T.pack address))
+      loaded <- loadCache cfg
+      let run = do
+            authenticated <- login
+            case authenticated of
+              Left err -> pure [Left ("Login", err)]
+              Right () -> ff (UrlWithDest address root) stages
+      fst <$> runStateT run loaded
+  case result of
+    Left err -> hPutStrLn stderr err >> pure False
+    Right errors -> do
+      mapM_ (either (\(context, err) -> hPutStrLn stderr (context ++ ": " ++ err)) pure) errors
+      let ok = all isRight errors
+      putStrLn (if ok then "Scrape completed." else "Scrape incomplete; successful subtrees can be resumed.")
+      pure ok
