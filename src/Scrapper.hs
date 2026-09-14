@@ -41,6 +41,7 @@ login = runExceptT $ do
 tag_class_f :: String -> String -> (Tag String -> a) -> [Tag String] -> [a]
 tag_class_f tag cls f = map f . filter (\t -> t ~== TagOpen tag [] && cls `elem` words (fromAttrib "class" t))
 
+-- | Fetch canonicalized HTML tags, rejecting a recognizable login page.
 extracturl :: URLString -> PPM (Either String [Tag String])
 extracturl target = do
   result <- fmap (canonicalizeTags . parseTags) <$> openURL target
@@ -55,6 +56,7 @@ copyBody reader output = do
   chunk <- reader
   unless (BS.null chunk) $ BS.hPut output chunk >> copyBody reader output
 
+-- | Copy a cached file using bounded chunks.
 copyHandle :: Handle -> Handle -> IO ()
 copyHandle input = copyBody (BS.hGetSome input 32768)
 
@@ -118,6 +120,7 @@ prepareChildren parent children = do
       address <- resolveURL (url parent) (url child)
       pure child {url = address, dest = dest parent </> normalise (dest child)}
 
+-- | Convert an adapter's IO exceptions to stage failures without catching Ctrl-C.
 attempt :: Stage -> Stage
 attempt stage node = StateT $ \cfg -> do
   result <- tryIOError (runStateT (stage node) cfg)
