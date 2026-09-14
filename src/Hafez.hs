@@ -1,111 +1,70 @@
+-- | The Hafez adapter: group index -> ghazal index -> bilingual text.
 module Hafez where
 
-import qualified Data.Text as T (pack, replace, unpack)
-import Text.HTML.TagSoup
+import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
-import System.FilePath.Posix ((</>), joinPath, splitPath)
-import Control.Monad.Trans.State (gets, put, get, StateT, runStateT)
-import List (splitOn, basename, dirname)
-
-import Data.List (isSuffixOf)
-import System.Directory
-
-import Types
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
+import Control.Monad.Trans.State.Strict (gets)
+import Data.List (nub)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
+import System.FilePath ((</>))
+import Text.HTML.TagSoup
+import Text.HTML.TagSoup.Tree (TagTree (..), tagTree, universeTree)
+import Helpers
 import Scrapper
-import Misc (joinPaths)
+import Types
 
------------------------------------------------------------
+-- | Pure selectors for the current group/ghazal lists. Reject layout changes.
+extractLinks :: URLString -> [Tag String] -> Either String [UrlWithDest]
+extractLinks parent tags = do
+  let refs = nub (concat [tag_class_f "a" cls (fromAttrib "href") tags | cls <- ["group-card", "g-link"]])
+  when (null refs || any null refs) $ Left "No Hafez links found (expected group-card or g-link anchors)"
+  traverse (\ref -> do
+    address <- resolveURL parent ref
+    pure (UrlWithDest address (url_basename address))) refs
 
+findlinks :: Stage
+findlinks node = do
+  result <- extracturl (url node)
+  pure (result >>= extractLinks (url node))
 
-concaturl a b = joinPaths (dirname a) (b)
-  
-cleanUrl u = if isSuffixOf "index.htm" u then take (length u - length "index.htm") u else u
-
--- hafizonlove first and second level
--- findlinks :: [Tag String] -> [String]
-findlinks :: UrlWithDest -> PPM (Either String [UrlWithDest])
-findlinks UrlWithDest{url=url} = do
-  -- liftIO $ print ("LOADING:", urldldir</>)
-  extracted <- f <$> extracturl url
-  -- liftIO $ print ("FOUND:", extracted)
-  return extracted
-  where f = Right . map curateHref . filter (~=="<a>") . takeWhile (~/= "<p>") . dropWhile (~/= "<li>") . dropWhile (~/= "<div class=linklist>")
-        curateHref e =  UrlWithDest (concaturl url hr) (basename $ cleanUrl hr)
-          where hr = fromAttrib "href" e
--- hafizonlove content download
-
-
-curatePoem = T.unpack
-  . T.replace (T.pack "\n\r\n") (T.pack "\n")
-  -- . T.replace (T.pack "") (T.pack "\n")
-  . T.pack
-
-savePoem :: FilePath -> [String] -> PPM ()
-savePoem dest [en, fa] = do
-  liftIO $ do
-    createDirectoryIfMissing True dest
-    writeFile (dest</>"en.txt") $ curatePoem en
-    writeFile (dest</>"fa.txt") $ curatePoem fa
-savePoem dest x = error $ show x
-
-    
-replaceTags :: (Tag String -> Bool) -> Tag String -> [Tag String] -> [Tag String]
-replaceTags pred r l = map f l
-  where f e | pred e = r
-            | otherwise = e
-            
-
--- genPoem :: FilePath -> [Tag String] -> PPM ()
--- genPoem dest = savePoem dest .
---   map run . splitOn (\e -> e ~== "<Div>" && (fromAttrib "id" e `elem` ["Eng", "farsi"])) .
---   drop 2 . dropWhile (~/= "<Div id=Main>")
---   where
---     run :: [Tag String] -> String
---     run = unlines . map (unwords . words . fromTagText) . takeWhile isText . filter (~/="<br>") . drop 1 . dropWhile (~/= "<p>")
---     isText (TagText _) = True
---     isText _ = False
-
-genPoem :: UrlWithDest -> PPM (Either String [UrlWithDest])
-genPoem UrlWithDest{url=url, dest=dest} = do
-  let f = map run . splitOn (\e -> e ~== "<Div>" && (fromAttrib "id" e `elem` ["Eng", "farsi"])) .
-        drop 2 . dropWhile (~/= "<Div id=Main>")
-  urlextracted <- extracturl url
-  let poems = f urlextracted
-  -- liftIO $ print (url, urlextracted, poems)
-  liftIO $ writeFile (dest</>"all.txt") $ "--------------------" ++ show urlextracted ++ "\n====\n" ++ show poems
-
-  liftIO $ putStrLn url
-  savePoem dest poems
-  -- (f <$> extracturl url) >>= savePoem dest
-  return $ Right []
+-- | Preserve inline markup text and line breaks; require aligned English/Farsi
+-- verse blocks so a changed layout cannot silently generate empty/truncated files.
+parsePoem :: [Tag String] -> Either String (String, String)
+parsePoem tags = do
+  let blocks cls = [T.strip (T.pack (concatMap render children))
+                  | TagBranch "div" attrs children <- universeTree (tagTree tags)
+                  , cls `elem` words (maybe "" id (lookup "class" attrs))]
+      english = blocks "v-en"
+      farsi = blocks "v-fa"
+      combine = T.unpack . (<> T.pack "\n") . T.intercalate (T.pack "\n\n")
+  when (null english || length english /= length farsi || any T.null (english ++ farsi)) $
+    Left "Expected matching, nonempty v-en and v-fa verse blocks"
+  pure (combine english, combine farsi)
   where
-    run :: [Tag String] -> String
-    run = unlines . map (unwords . words . fromTagText) . takeWhile isText . filter (~/= "</br>") . filter (~/="<br>") . filter (~/= "</p>") . filter (~/="<p>") . drop 1 . dropWhile (~/= "<p>")
-    isText (TagText _) = True
-    isText _ = False
+    render (TagLeaf (TagText text)) = text
+    render (TagLeaf (TagOpen "br" _)) = "\n"
+    render (TagBranch "br" _ _) = "\n"
+    render (TagBranch _ _ children) = concatMap render children
+    render _ = ""
 
-
-
--- genPoem = -- map run
---           -- . filter (\(x:xs) -> fromAttrib "id" x `elem` ["Eng", "farsi"])
---           splitOn (~=="<div>") . dropWhile (~/= "<div id=Eng>") . dropWhile (~/= "<div id=Main>")
-
-
-
-
------------------------------------------------------------
-
+genPoem :: Stage
+genPoem node = runExceptT $ do
+  tags <- ExceptT (extracturl (url node))
+  (english, farsi) <- ExceptT (pure (parsePoem tags))
+  root <- lift (gets download_folder)
+  ExceptT $ liftIO $ ioEither $ mapM_ (\(name, content) ->
+    writeOutput root (dest node </> name) (T.encodeUtf8 (T.pack content)))
+    [("en.txt", english), ("fa.txt", farsi), ("source.txt", url node ++ "\n")]
+  pure []
 
 mkcfg :: IO Config
-mkcfg = createConfig $ defaultconfig {
-        download_folder = "./hafez_downloads/",
-        base = "http://www.hafizonlove.com/divan/"
-        }
+mkcfg = createConfig defaultconfig
+  { download_folder = "hafez_downloads"
+  , base = "https://www.hafizonlove.com/divan/"
+  }
 
-fs :: [UrlWithDest -> PPM (Either String [UrlWithDest])]
-fs = [
-  findlinks,
-  findlinks,
-  genPoem
-     ]
-
+fs :: [Stage]
+fs = [findlinks, findlinks, genPoem]

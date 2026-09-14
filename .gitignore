@@ -1,3 +1,9 @@
 .stack-work/
 haskellwebscrapper.cabal
-*~Secrets.hs
+dist-newstyle/
+*~
+Secrets.hs
+cookies
+.env
+*_downloads/
+__pycache__/

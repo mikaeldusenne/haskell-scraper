@@ -1,0 +1,27 @@
+name: CI
+on:
+  push:
+    branches: [master]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: haskell-actions/setup@v2
+        with:
+          ghc-version: '9.10.3'
+          enable-stack: true
+          stack-version: 'latest'
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.stack
+            .stack-work
+          key: stack-${{ runner.os }}-${{ hashFiles('stack.yaml', 'stack.yaml.lock', 'package.yaml') }}
+      - run: stack test --system-ghc --no-install-ghc --ghc-options=-Werror
+      - run: stack haddock --no-haddock-deps --system-ghc --no-install-ghc
+      - run: python3 test/smoke.py
+      - run: stack sdist

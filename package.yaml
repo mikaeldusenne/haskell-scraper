@@ -1,62 +1,46 @@
-name:                haskellwebscrapper
-version:             0.1.0.0
-github:              "githubuser/haskellwebscrapper"
-license:             BSD3
-author:              "Author name here"
-maintainer:          "example@example.com"
-copyright:           "2020 Author name here"
+name: haskellwebscrapper
+version: 0.2.0.0
+github: mikaeldusenne/haskell-scraper
+license: BSD3
+author: Mikaël Dusenne
+synopsis: Resumable, staged HTML scraping
+category: Web
+description: See the README at <https://github.com/mikaeldusenne/haskell-scraper#readme>.
 
 extra-source-files:
 - README.md
-- ChangeLog.md
-
-# Metadata used when publishing your package
-# synopsis:            Short description of your package
-# category:            Web
-
-# To avoid duplicated efforts in documentation and dealing with the
-# complications of embedding Haddock markup inside cabal files, it is
-# common to point users to the README.md file.
-description:         Please see the README on GitHub at <https://github.com/githubuser/haskellwebscrapper#readme>
+- test/fixtures/**/*
+- test/smoke.py
 
 dependencies:
-- base >= 4.7 && < 5
-- curl
-- hlib
-- tagsoup
-- download-curl
-- directory
-- HTTP
+- base >= 4.18 && < 5
 - bytestring
+- directory
 - filepath
-- unix
+- http-client >= 0.7 && < 0.8
+- http-client-tls >= 0.3 && < 0.4
+- http-types
+- network-uri
 - SHA
-- transformers
+- tagsoup
 - temporary
-- either
 - text
+- transformers
+
+ghc-options: -Wall
 
 library:
   source-dirs: src
 
 executables:
   haskellwebscrapper-exe:
-    main:                Main.hs
-    source-dirs:         app
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
-    dependencies:
-    - haskellwebscrapper
+    main: Main.hs
+    source-dirs: app
+    ghc-options: -threaded -rtsopts
+    dependencies: haskellwebscrapper
 
 tests:
   haskellwebscrapper-test:
-    main:                Spec.hs
-    source-dirs:         test
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
-    dependencies:
-    - haskellwebscrapper
+    main: Spec.hs
+    source-dirs: test
+    dependencies: haskellwebscrapper
