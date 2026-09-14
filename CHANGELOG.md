@@ -7,6 +7,8 @@
 - Support fresh hidden CSRF form tokens and session cookies during login.
 - Reject non-PDF responses before writing a successful download/cache entry.
 - Add a local credential prompt and focused offline/loopback coverage.
+- Trim surrounding whitespace in AmeriLingua links before URL and fragment parsing,
+  fixing `Invalid URL reference` on lessons such as `who-said-that`.
 
 ## 0.2.0.0
 

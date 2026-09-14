@@ -45,9 +45,9 @@ blocks :: [String] -> [TagTree String] -> [[TagTree String]]
 blocks classes trees = [children | TagBranch _ attrs children <- universeTree trees
   , all (`elem` words (attribute "class" attrs)) classes]
 
--- | Attribute lookup with the same empty-value convention as TagSoup.
+-- | Trim surrounding HTML attribute whitespace before parsing hrefs or fragments.
 attribute :: String -> [(String, String)] -> String
-attribute key = maybe "" id . lookup key
+attribute key = maybe "" (T.unpack . T.strip . T.pack) . lookup key
 
 -- | Anchor attributes and text, restricted to the supplied subtree.
 anchors :: [TagTree String] -> [([(String, String)], String)]
