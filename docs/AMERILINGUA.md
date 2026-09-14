@@ -65,6 +65,10 @@ scraper's error, without passwords, CSRF tokens or cookie values.
 
 - Lesson links come from `.lesson-item.row`; resource buttons come from
   `.lesson-files .lesson-files-item a`. Unrelated navigation is excluded.
+- Surrounding whitespace in `href` attributes is trimmed before URL parsing;
+  resource queries and Google Slides fragments are preserved. If an older version
+  failed with `Invalid URL reference` on a padded link, update and rerun the same
+  command/output directory to retry unfinished lessons and retain completed ones.
 - Catalogue pagination follows the next-page link (`rel="next"`, `»`, `›`, or
   `Next`), preserves filters in that link, and rejects cycles or more than 200
   catalogue pages. Index pages are discovered before downloading the lessons.
