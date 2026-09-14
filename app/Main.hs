@@ -1,6 +1,7 @@
 module Main (main) where
 
 import Control.Monad (foldM, unless)
+import qualified AmeriLingua
 import Data.Version (showVersion)
 import Hafez (fs)
 import Paths_haskellwebscrapper (version)
@@ -15,8 +16,8 @@ type Option = Config -> Either String Config
 
 options :: [OptDescr Option]
 options =
-  [ Option ['o'] ["output"] (ReqArg (\value cfg -> Right cfg {download_folder = value}) "DIR") "Output directory (default: hafez_downloads)"
-  , Option [] ["base-url"] (ReqArg (\value cfg -> Right cfg {base = value}) "URL") "Index URL (default: https://www.hafizonlove.com/divan/)"
+  [ Option ['o'] ["output"] (ReqArg (\value cfg -> Right cfg {download_folder = value}) "DIR") "Output directory (default: <site>_downloads)"
+  , Option [] ["base-url"] (ReqArg (\value cfg -> Right cfg {base = value}) "URL") "Starting URL (site default; AmeriLingua also accepts one lesson)"
   , Option [] ["delay-ms"] (ReqArg (number (\n cfg -> cfg {request_delay_ms = n})) "N") "Delay before each request (default: 1000)"
   , Option [] ["retries"] (ReqArg (number (\n cfg -> cfg {retry_count = n})) "N") "Extra attempts per failed stage (default: 2)"
   , Option [] ["timeout-seconds"] (ReqArg (number (\n cfg -> cfg {timeout_seconds = n})) "N") "HTTP response timeout (default: 30; must be positive)"
@@ -27,7 +28,17 @@ options =
       _ -> Left ("Expected a nonnegative integer, got: " ++ value)
 
 usage :: String
-usage = usageInfo "Usage: haskellwebscrapper-exe hafez [OPTIONS]\n       haskellwebscrapper-exe --help | --version\n\nExtract English and Farsi ghazals from Hafez-style pages.\nNo arguments prints help without crawling.\n" options
+usage = usageInfo "Usage: haskellwebscrapper-exe (hafez|amerilingua) [OPTIONS]\n       haskellwebscrapper-exe --help | --version\n\nhafez: English/Farsi poems. amerilingua: lesson PDFs and resource links.\nAmeriLingua login: AMERILINGUA_LOGIN/PASS (see docs/AMERILINGUA.md).\nNo arguments prints help without crawling.\n" options
+
+run :: Config -> (Config -> [Stage]) -> [String] -> IO ()
+run _ _ ["--help"] = putStrLn usage
+run _ _ ["-h"] = putStrLn usage
+run defaults pipeline args = do
+  let (updates, unexpected, errors) = getOpt Permute options args
+  unless (null errors && null unexpected) $ die (concat errors ++ "Unexpected arguments: " ++ unwords unexpected ++ "\n" ++ usage)
+  cfg <- either die pure $ foldM (flip ($)) defaults updates
+  ok <- mainLoop cfg (pipeline cfg)
+  unless ok exitFailure
 
 main :: IO ()
 main = do
@@ -37,12 +48,8 @@ main = do
     ["--help"] -> putStrLn usage
     ["-h"] -> putStrLn usage
     ["--version"] -> putStrLn (showVersion version)
-    ["hafez", "--help"] -> putStrLn usage
-    "hafez" : rest -> do
-      let (updates, unexpected, errors) = getOpt Permute options rest
-      unless (null errors && null unexpected) $ die (concat errors ++ "Unexpected arguments: " ++ unwords unexpected ++ "\n" ++ usage)
-      cfg <- either die pure $ foldM (flip ($)) defaultconfig
-        {download_folder = "hafez_downloads", base = "https://www.hafizonlove.com/divan/"} updates
-      ok <- mainLoop cfg fs
-      unless ok exitFailure
+    "hafez" : rest -> run defaultconfig
+      {download_folder = "hafez_downloads", base = "https://www.hafizonlove.com/divan/"}
+      (const fs) rest
+    "amerilingua" : rest -> run AmeriLingua.config AmeriLingua.stages rest
     _ -> die usage

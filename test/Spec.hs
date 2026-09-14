@@ -2,6 +2,7 @@
 module Main (main) where
 
 import Control.Monad (unless, void)
+import qualified AmeriLingua as Ameri
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.State.Strict (evalStateT, gets)
 import qualified Data.ByteString as BS
@@ -46,6 +47,7 @@ main = do
     ("Hello world.\nOne & two.\n\nAnother line.\n", "سلام دنیا\nیک و دو\n\nیک خط دیگر\n")
   assert "Missing language rejected" $ isLeft (parsePoem (parseTags "<div class='v-en'>Only English</div>"))
   assert "Layout changes rejected" $ isLeft (extractLinks "https://example.org/" (parseTags "<a href='x'>Navigation</a>"))
+  testAmeriLingua
   withSystemTempDirectory "scraper-test" $ \directory -> do
     cfg <- createConfig defaultconfig {download_folder = directory, retry_count = 0, retry_delay_ms = 0}
     attempts <- newIORef (0 :: Int)
@@ -66,6 +68,30 @@ main = do
   testResume
   lookupEnv "SCRAPER_TEST_ORIGIN" >>= maybe (pure ()) testHTTP
   putStrLn "All regression checks passed."
+
+-- Synthetic site contracts: scoped links, pagination, every resource, and CSRF.
+testAmeriLingua :: IO ()
+testAmeriLingua = do
+  let origin = "https://www.amerilingua.com"
+      readTags path = canonicalizeTags . parseTags . T.unpack <$> T.readFile ("test/fixtures/amerilingua/" ++ path)
+      token value = "<input type='hidden' name='_token' value='" ++ value ++ "'>"
+  index <- readTags "index.html"
+  lesson <- readTags "lesson.html"
+  assert "Scoped, deduplicated lesson links and pagination" $
+    Ameri.parseIndex (origin ++ "/esl-lesson-plans") index == Right
+      ([UrlWithDest (origin ++ "/esl-lesson-plans/lesson-one") "lesson-one"], Just (origin ++ "/esl-lesson-plans?page=2"))
+  assert "All PDFs and the complete external slide link" $ case Ameri.parseResources (origin ++ "/esl-lesson-plans/lesson-one") lesson of
+    Right (pdfs, links) -> map dest pdfs == ["lesson_plan.pdf", "worksheets.pdf", "worksheets_key.pdf", "homework.pdf", "homework_key.pdf"]
+      && length links == 6 && "https://docs.google.com/presentation/d/synthetic-deck/edit?mode=view#slide=id.demo" `elem` links
+    Left _ -> False
+  let locked = [if tag == TagOpen "a" [("href", "/lesson-file/lesson-one/homework_file_pdf")]
+               then TagOpen "a" [("href", "#")] else tag | tag <- lesson]
+  assert "One locked resource cannot complete a lesson" $ isLeft (Ameri.parseResources origin locked)
+  assert "CSRF forms must agree on one nonempty token" $ and
+    [ formToken "_token" (parseTags (token "fresh" ++ token "fresh")) == Right "fresh"
+    , isLeft (formToken "_token" (parseTags (token "one" ++ token "two")))
+    , isLeft (formToken "_token" [])
+    ]
 
 testResume :: IO ()
 testResume = withSystemTempDirectory "scraper-resume" $ \directory -> do

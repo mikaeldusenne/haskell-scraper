@@ -26,6 +26,7 @@ import System.IO.Error (catchIOError, isDoesNotExistError, tryIOError)
 import System.IO.Temp (withTempFile)
 import Types
 
+-- | A bounded filename component, preserving letters, digits, dots and dashes.
 mkname :: String -> String
 mkname input = case map clean (dropWhileEnd isSpace (dropWhile isSpace input)) of
   "" -> "index.html"
@@ -46,6 +47,7 @@ resolveURL parent reference = do
       Right (show resolved {uriFragment = ""})
     _ -> Left "Only absolute HTTP(S) URLs without embedded credentials are supported"
 
+-- | Compare scheme, hostname and effective port (including default ports).
 sameOrigin :: String -> String -> Bool
 sameOrigin a b = case (parseURI a >>= origin, parseURI b >>= origin) of
   (Just x, Just y) -> x == y
@@ -57,6 +59,7 @@ sameOrigin a b = case (parseURI a >>= origin, parseURI b >>= origin) of
           port = if null (uriPort auth) then if scheme == "https:" then ":443" else ":80" else uriPort auth
       pure (scheme, map toLower (uriRegName auth), port)
 
+-- | Resolve against the configured base; use 'resolveURL' for nested pages.
 mkurl :: URLString -> PPM (Either String URLString)
 mkurl reference = gets (\cfg -> resolveURL (base cfg) reference)
 
@@ -106,6 +109,7 @@ writeOutput root path bytes = do
       unless (previous == bytes) $ ioError (userError ("Refusing to overwrite different content: " ++ path))
     else atomicWrite path (`BS.hPut` bytes)
 
+-- | Millisecond delay with checked conversion to the runtime's microseconds.
 pause :: Int -> IO ()
 pause ms = threadDelay (fromInteger (min (toInteger (maxBound :: Int)) (1000 * toInteger ms)))
 
@@ -163,12 +167,13 @@ request target form consume = do
     httpError (HTTP.HttpExceptionRequest _ HTTP.ConnectionTimeout) = "HTTP connection timeout"
     httpError _ = "HTTP transport failure (connection, TLS or incomplete response)"
 
--- | UTF-8 HTML. Cookies are held in 'Config', never written to disk.
+-- | UTF-8 HTML. Cookies are held in @Config@, never written to disk.
 openURL :: URLString -> PPM (Either String String)
 openURL target = do
   bytes <- request target Nothing (fmap BS.concat . HTTP.brConsume)
   pure $ bytes >>= first (const "Page is not valid UTF-8") . fmap T.unpack . T.decodeUtf8'
 
+-- | Context and the last error from an exhausted retry budget.
 type NamedErrorStr = (String, String)
 
 -- | At most @1 + retries@ attempts; no delay after the final failure.

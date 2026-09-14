@@ -23,7 +23,16 @@ import Text.HTML.TagSoup
 import Helpers
 import Types
 
--- | Submit form credentials from the configured environment variables once.
+-- | Extract a fresh hidden CSRF field; repeated forms may share the same token.
+formToken :: String -> [Tag String] -> Either String String
+formToken field tags = case nub [fromAttrib "value" tag | tag <- tags
+  , tag ~== TagOpen "input" [], fromAttrib "type" tag == "hidden"
+  , fromAttrib "name" tag == field, not (null (fromAttrib "value" tag))] of
+    [value] -> Right value
+    _ -> Left "Login form has no unambiguous CSRF token; check login_csrf_field"
+
+-- | Submit credentials once. If configured, first fetch a fresh CSRF token and
+-- session cookies; neither credentials nor tokens are written to disk.
 login :: PPM (Either String ())
 login = runExceptT $ do
   cfg <- lift get
@@ -35,12 +44,19 @@ login = runExceptT $ do
             maybe (throwE ("Missing environment variable: " ++ login_env_prefix cfg ++ key)) pure value
       username <- credential "LOGIN"
       password <- credential "PASS"
-      ExceptT $ request path (Just [(login_arg_login cfg, username), (login_arg_pass cfg, password)]) (\reader -> HTTP.brConsume reader >> pure ())
+      hidden <- case login_csrf_field cfg of
+        Nothing -> pure []
+        Just field -> do
+          page <- ExceptT (openURL path)
+          token <- either throwE pure (formToken field (canonicalizeTags (parseTags page)))
+          pure [(field, token)]
+      ExceptT $ request path (Just (hidden ++ [(login_arg_login cfg, username), (login_arg_pass cfg, password)])) (\reader -> HTTP.brConsume reader >> pure ())
 
 -- | Select elements whose whitespace-separated class list contains the class.
 tag_class_f :: String -> String -> (Tag String -> a) -> [Tag String] -> [a]
 tag_class_f tag cls f = map f . filter (\t -> t ~== TagOpen tag [] && cls `elem` words (fromAttrib "class" t))
 
+-- | Fetch canonicalized HTML tags, rejecting a recognizable login page.
 extracturl :: URLString -> PPM (Either String [Tag String])
 extracturl target = do
   result <- fmap (canonicalizeTags . parseTags) <$> openURL target
@@ -55,13 +71,19 @@ copyBody reader output = do
   chunk <- reader
   unless (BS.null chunk) $ BS.hPut output chunk >> copyBody reader output
 
+-- | Copy a cached file using bounded chunks.
 copyHandle :: Handle -> Handle -> IO ()
 copyHandle input = copyBody (BS.hGetSome input 32768)
 
 -- | Download or copy a known cached URL, then record success. Existing unknown
 -- files and symlinks are never replaced. Call within 'mainLoop' for its lock.
 download :: UrlWithDest -> PPM (Either String ())
-download node = runExceptT $ do
+download = downloadWith copyBody
+
+-- | Validate/consume a response before committing it to disk or the URL cache.
+-- The consumer must throw on invalid content and stream the complete valid body.
+downloadWith :: (HTTP.BodyReader -> Handle -> IO ()) -> UrlWithDest -> PPM (Either String ())
+downloadWith consume node = runExceptT $ do
   address <- ExceptT (mkurl (url node))
   cfg <- lift get
   let root = download_folder cfg
@@ -85,7 +107,7 @@ download node = runExceptT $ do
           pure (if present then Just original else Nothing)
       case source of
         Just original -> io $ withBinaryFile original ReadMode $ \input -> atomicWrite path (copyHandle input)
-        Nothing -> ExceptT $ request address Nothing (\reader -> atomicWrite path (copyBody reader))
+        Nothing -> ExceptT $ request address Nothing (\reader -> atomicWrite path (consume reader))
       -- Append only after the completed file is in place.
       io $ BS.appendFile (root </> urlsfile cfg) (T.encodeUtf8 (T.pack (show (address, relative) ++ "\n")))
       lift $ modify' (\state -> state {alreadies_urls = (address, relative) : alreadies_urls state})
@@ -118,6 +140,7 @@ prepareChildren parent children = do
       address <- resolveURL (url parent) (url child)
       pure child {url = address, dest = dest parent </> normalise (dest child)}
 
+-- | Convert an adapter's IO exceptions to stage failures without catching Ctrl-C.
 attempt :: Stage -> Stage
 attempt stage node = StateT $ \cfg -> do
   result <- tryIOError (runStateT (stage node) cfg)
