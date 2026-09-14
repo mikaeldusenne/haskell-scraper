@@ -73,7 +73,7 @@ class Handler(SimpleHTTPRequestHandler):
             if parse_qs(body) == expected and "preauth=fresh" in self.headers.get("Cookie", ""):
                 self.reply(302, Location="/esl-lesson-plans", Set_Cookie="laravel_session=valid; Path=/; HttpOnly")
             else:
-                self.reply(401)
+                self.reply(302, Location="/login")  # Failed form login can still end with HTTP 200.
         elif self.path == "/login" and parse_qs(body) == {"name": ["test+&=é"], "password": ["p&=+ss"]}:
             self.reply(302, Location="/protected", Set_Cookie="session=valid; Path=/")
         else:
@@ -135,6 +135,7 @@ def test_amerilingua(executable, origin, temporary):
                "--delay-ms", "0", "--retries", "0"]
     denied = check(command, env={**env, "AMERILINGUA_PASS": "wrong-secret"}, success=False)
     assert "wrong-secret" not in denied.stdout + denied.stderr
+    assert "locked or missing" in denied.stderr and not (output / ".scraper-finished").exists()
     check(command, env=env)
     assert len(list(output.glob("*/*.pdf"))) == 10, "Did not download every PDF on both catalogue pages"
     assert "#slide=id.demo" in (output / "lesson-one/links.txt").read_text()
