@@ -8,8 +8,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Thread
 from urllib.parse import parse_qs
+import base64
+import json
 import os
 import subprocess
+import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +23,7 @@ class Handler(SimpleHTTPRequestHandler):
     fail_poem = False
     amerilingua = False
     expired_pdf = False
+    expired_audio = False
 
     def log_message(self, *_):
         pass
@@ -42,6 +46,8 @@ class Handler(SimpleHTTPRequestHandler):
         elif self.path.startswith("/esl-lesson-plans"):
             fixture = "index.html" if self.path in ("/esl-lesson-plans", "/esl-lesson-plans?page=2") else "lesson.html"
             body = (ROOT / "test/fixtures/amerilingua" / fixture).read_text()
+            if fixture == "lesson.html":
+                body += (ROOT / "test/fixtures/amerilingua/content.html").read_text()
             if self.path.endswith("page=2") or self.path.endswith("lesson-two"):
                 body = body.replace("lesson-one", "lesson-two").replace('<a href="?page=2" rel="next">»</a>', "")
             if fixture == "lesson.html" and "laravel_session=valid" not in self.headers.get("Cookie", ""):
@@ -50,6 +56,14 @@ class Handler(SimpleHTTPRequestHandler):
         elif self.path.startswith("/lesson-file/"):
             body = b"<html>Log in</html>" if self.expired_pdf else b"%PDF-1.4\nSynthetic fixture\n%%EOF\n"
             self.reply(200, body, Content_Length=str(len(body)))
+        elif self.path.startswith("/lesson-audio/"):
+            expired = self.expired_audio and self.path == "/lesson-audio/212/lesson-two"
+            body = b"ID3\4\0\0synthetic"
+            if "/211/" in self.path:
+                body = base64.b64encode(body)
+            if expired or "laravel_session=valid" not in self.headers.get("Cookie", ""):
+                body = b"<html>Log in</html>"
+            self.reply(200, body, Content_Type="audio/mpeg", Content_Length=str(len(body)))
         elif self.path == "/external":
             self.reply(302, Location=f"http://localhost:{self.server.server_port}/asset")
         elif self.path == "/slow":
@@ -123,6 +137,7 @@ def main():
         check(tests, env={**os.environ, "SCRAPER_TEST_ORIGIN": origin})
         assert Handler.requests["/asset"] == 1, "Cached asset was fetched twice"
         test_amerilingua(executable, origin, Path(temporary))
+        test_video_launcher(Path(temporary))
     print("CLI, failure recovery, HTTP errors, streaming, login, AmeriLingua and resume passed.")
 
 
@@ -153,6 +168,63 @@ def test_amerilingua(executable, origin, temporary):
     Handler.expired_pdf = False
     check(single_command, env=env)
     assert len(list(single.glob("*.pdf"))) == 5
+    test_content(executable, origin, output, env)
+
+
+def test_content(executable, origin, output, env):
+    """Enrich completed PDF folders; a failed audio must remain retryable."""
+    command = [executable, "amerilingua-content", "--base-url", origin + "esl-lesson-plans",
+               "--output", str(output), "--delay-ms", "0", "--retries", "0"]
+    pdf_requests = {path: count for path, count in Handler.requests.items() if path.startswith("/lesson-file/")}
+    Handler.expired_audio = True
+    check(command, env=env, success=False)
+    assert (output / ".scraper-finished").exists(), "Enrichment changed the PDF checkpoint"
+    assert (output / "lesson-one/.scraper-content-finished").exists()
+    assert not (output / ".scraper-content-finished").exists()
+    assert not (output / "lesson-two/audio/212.mp3").exists(), "Login HTML saved as MP3"
+    assert "/lesson-audio/212/lesson-two" not in (output / ".scraper-urls").read_text()
+    requests = Handler.requests.copy()
+    Handler.expired_audio = False
+    check(command, env=env)
+    assert (output / ".scraper-content-finished").exists()
+    assert all(Handler.requests[path] == count for path, count in pdf_requests.items()), "Enrichment downloaded PDFs"
+    assert Handler.requests["/lesson-audio/211/lesson-two"] == requests["/lesson-audio/211/lesson-two"]
+    assert Handler.requests["/lesson-audio/211/lesson-one"] == requests["/lesson-audio/211/lesson-one"]
+    assert all(path.read_bytes() == b"ID3\4\0\0synthetic" for path in output.glob("*/audio/*.mp3"))
+    assert len(list(output.glob("*/audio/*.mp3"))) == 4
+    assert "First sentence." in (output / "lesson-one/lesson.md").read_text()
+    assert (output / "lesson-one/video-urls.txt").read_text().strip() == "https://player.vimeo.com/video/123456?app_id=1&h=synthetic#t=2s"
+    requests = Handler.requests.copy()
+    check(command, env=env)
+    assert all(Handler.requests[path] == count for path, count in requests.items() if path.startswith("/lesson-audio/"))
+
+
+def test_video_launcher(temporary):
+    """Verify referer/paths and error cleanup with a fake downloader, without Vimeo."""
+    output = temporary / "video catalogue with spaces"
+    lesson = output / "lesson-one"
+    lesson.mkdir(parents=True)
+    (lesson / "source.txt").write_text("https://www.amerilingua.com/esl-lesson-plans/lesson-one\n")
+    (lesson / "video-urls.txt").write_text("https://player.vimeo.com/video/123456?app_id=1\n")
+    binary = temporary / "yt-dlp"
+    log = temporary / "video-arguments.json"
+    binary.write_text(f"#!{sys.executable}\nimport json, os, sys\nfrom pathlib import Path\n"
+                     "Path(os.environ['VIDEO_TEST_LOG']).write_text(json.dumps(sys.argv[1:]))\n"
+                     "sys.exit(int(os.environ.get('VIDEO_TEST_FAIL', '0')))\n")
+    binary.chmod(0o755)
+    env = {**os.environ, "PATH": str(temporary) + os.pathsep + os.environ["PATH"], "VIDEO_TEST_LOG": str(log)}
+    command = ["bash", str(ROOT / "scripts/amerilingua-videos.sh"), str(output)]
+    check(command, env=env)
+    args = json.loads(log.read_text())
+    assert args[args.index("--add-headers") + 1] == "Referer:https://www.amerilingua.com/esl-lesson-plans/lesson-one"
+    assert args[args.index("--batch-file") + 1] == str(lesson / "video-urls.txt")
+    assert args[args.index("--paths") + 1] == str(lesson / "video")
+    check(command, env={**env, "VIDEO_TEST_FAIL": "1"}, success=False)
+    assert not (output / ".scraper-lock").exists(), "Video failure left the crawl locked"
+    (lesson / "video").rmdir()
+    (lesson / "video").symlink_to(temporary, target_is_directory=True)
+    rejected = check(command, env=env, success=False)
+    assert "symbolic link" in rejected.stderr
 
 
 if __name__ == "__main__":

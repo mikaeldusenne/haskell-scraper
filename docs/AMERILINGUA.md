@@ -36,6 +36,71 @@ For automation, supply `AMERILINGUA_LOGIN` and `AMERILINGUA_PASS` through your
 process environment and run `stack run -- amerilingua [OPTIONS]` directly. Do not
 put credentials in Git, command arguments, examples, or bug reports.
 
+## Add objectives, transcripts, vocabulary and media
+
+The `amerilingua-content` command enriches the **same output directory** as a
+previous PDF crawl. It fetches lesson pages again and downloads pronunciation
+clips, with its own `.scraper-content-finished` checkpoints. Existing PDF files,
+PDF checkpoints and `links.txt` are retained; this command makes no PDF requests.
+Use the same starting URL as the original crawl.
+
+If your private environment file defines `AMERILINGUA_EMAIL` and `AMERILINGUA_PWD`:
+
+```bash
+source "$HOME/.env"
+PATH="$HOME/.ghcup/bin:$PATH" \
+AMERILINGUA_LOGIN="$AMERILINGUA_EMAIL" \
+AMERILINGUA_PASS="$AMERILINGUA_PWD" \
+"$HOME/.ghcup/bin/stack" run -- amerilingua-content \
+  --base-url https://www.amerilingua.com/esl-lesson-plans \
+  --output amerilingua_catalogue
+```
+
+For a new single-lesson folder, `--base-url` can point to a lesson directly. The
+content command also works without an earlier PDF crawl. It prints each lesson
+being processed; rerunning the same command skips completed content and reuses
+cached MP3s from an interrupted lesson.
+
+| Output within each lesson folder | Contents |
+| --- | --- |
+| `lesson.md` | Lesson Objectives, video description/link, Video Transcript, vocabulary definitions and local pronunciation links |
+| `audio/<id>.mp3` | Pronunciation clips associated with vocabulary entries |
+| `video-urls.txt` | Video player/source URLs, preserving their query and fragment |
+
+Sections absent from a lesson are omitted. Present but empty sections fail
+explicitly, as does a page with none of the supported section headings. Audio
+responses can be raw MP3 or base64-encoded MP3; encoded input is capped at 10 MiB.
+HTML, invalid base64 and unrecognized audio headers are rejected before committing
+a file or cache entry. Header checks do not constitute a full media integrity check.
+
+### Download the videos
+
+The video in the inspected lesson is a Vimeo embed. Run the separate downloader
+after the content pass; it reads `video-urls.txt` and uses each lesson's `source.txt`
+as the HTTP Referer. It delegates video extraction, segmented streams and merging
+to [yt-dlp](https://github.com/yt-dlp/yt-dlp#readme).
+
+On Arch Linux, use the [yt-dlp](https://archlinux.org/packages/extra/any/yt-dlp/)
+and [ffmpeg](https://archlinux.org/packages/extra/x86_64/ffmpeg/) packages:
+
+```sh
+sudo pacman -S --needed yt-dlp ffmpeg
+bash scripts/amerilingua-videos.sh amerilingua_catalogue
+```
+
+Videos are saved under each lesson's `video/` directory. yt-dlp's per-lesson
+`video/archive.txt` records completed video IDs, and partial downloads can resume.
+The script refuses overwrites, uses the crawler's output lock and returns a failure
+status if a download fails; rerun the same command to retry. Google Slides remain
+links in `links.txt`; this script processes only the lesson's video section.
+
+Video requests go to the external provider through yt-dlp. AmeriLingua's in-memory
+cookies are not forwarded. Access depends on the provider accepting the embed and
+Referer; authentication challenges, disabled access and DRM are not bypassed.
+The text/audio selectors come from the supplied lesson HTML on 2026-09-15. Tests
+use synthetic HTML, loopback audio responses and a fake yt-dlp executable. Live
+authenticated audio and Vimeo downloads have not been independently verified.
+
 ## Login and access checks
 
 The configured flow is `GET /login`, followed by `POST /login` with the freshly
@@ -72,8 +137,8 @@ scraper's error, without passwords, CSRF tokens or cookie values.
 - Catalogue pagination follows the next-page link (`rel="next"`, `»`, `›`, or
   `Next`), preserves filters in that link, and rejects cycles or more than 200
   catalogue pages. Index pages are discovered before downloading the lessons.
-- Requests, redirects and PDF downloads stay within the configured origin.
-  External resource URLs are listed in `links.txt` without making requests to them.
+- Haskell requests, redirects, PDF downloads and pronunciation downloads stay within
+  the configured origin. The optional video script has separate external requests.
 - Ctrl-C stops the run. Use the same command/output directory to resume successful
   subtrees. Each new run signs in again; a session expiring mid-download causes a
   failed lesson, which can be retried on the next run.

@@ -130,6 +130,12 @@ The script prompts for your credentials locally. Start with one lesson before
 running the catalogue; see [the AmeriLingua guide](docs/AMERILINGUA.md) for login,
 pagination, output files, restart behavior and live-site validation limits.
 
+To add objectives, video transcripts, vocabulary and pronunciation MP3s to an
+existing PDF catalogue, use `amerilingua-content` with the same output directory.
+It maintains separate completion checkpoints. A companion yt-dlp script downloads
+the saved video URLs; see [content and media](docs/AMERILINGUA.md#add-objectives-transcripts-vocabulary-and-media)
+for commands, output files and the Arch Linux packages.
+
 ## Resume and preserve your files
 
 Use the **same command and output directory** to resume. Each node's

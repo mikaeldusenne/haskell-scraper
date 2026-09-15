@@ -5,6 +5,7 @@ import Control.Monad (unless, when)
 import Control.Monad.Trans.State.Strict (StateT, gets)
 import qualified Data.Text.IO as T
 import qualified Data.Text as T
+import Data.List (isPrefixOf)
 import Network.HTTP.Client (CookieJar, createCookieJar)
 import System.Directory
 import System.FilePath
@@ -43,6 +44,7 @@ data Config = Config
   , login_csrf_field :: Maybe String
   , login_needed_tag :: Tag String
   , urlsfile :: Path
+  , finishedfile :: Path
   , alreadies_urls :: Cache
   , request_delay_ms :: Int
   , retry_count :: Int
@@ -63,6 +65,7 @@ defaultconfig = Config
   , login_csrf_field = Nothing
   , login_needed_tag = TagOpen "button" [("aria-label", "Please sign in")]
   , urlsfile = ".scraper-urls"
+  , finishedfile = ".scraper-finished"
   , alreadies_urls = []
   , request_delay_ms = 1000
   , retry_count = 2
@@ -80,8 +83,12 @@ createConfig cfg = do
     ioError (userError "Delays/retries must be nonnegative; timeout must be positive")
   when (null (download_folder cfg)) $ ioError (userError "Output directory is empty")
   unless (takeFileName (urlsfile cfg) == urlsfile cfg
-          && urlsfile cfg `notElem` ["", ".", "..", ".scraper-lock", ".scraper-source", ".scraper-finished"]) $
+          && urlsfile cfg `notElem` ["", ".", "..", ".scraper-lock", ".scraper-source", ".scraper-finished", finishedfile cfg]) $
     ioError (userError "urlsfile must be a plain filename, distinct from crawler metadata")
+  unless (takeFileName (finishedfile cfg) == finishedfile cfg
+          && ".scraper-" `isPrefixOf` finishedfile cfg
+          && finishedfile cfg `notElem` [urlsfile cfg, ".scraper-lock", ".scraper-source"]) $
+    ioError (userError "finishedfile must be a distinct .scraper- metadata filename")
   createDirectoryIfMissing True (download_folder cfg)
   root <- canonicalizePath (download_folder cfg)
   pure cfg {download_folder = root}

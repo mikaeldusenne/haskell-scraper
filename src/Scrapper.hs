@@ -153,7 +153,7 @@ ff node (stage : rest) = do
   outcome <- runExceptT $ do
     cfg <- lift get
     let directory = dest node
-        marker = directory </> ".scraper-finished"
+        marker = directory </> finishedfile cfg
         identity = T.encodeUtf8 (T.pack (show (url node, length rest)))
         io = ExceptT . liftIO . ioEither
     io $ checkOutput (download_folder cfg) directory
