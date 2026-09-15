@@ -15,10 +15,31 @@ bash scripts/amerilingua.sh \
   --output amerilingua_telling_time
 ```
 
-The script asks for your AmeriLingua email and password locally. The password is
-hidden while typing; it is not a command argument, shell-history entry or saved
-configuration. These values exist only in the script's process and its children.
-Do not run the script with shell tracing (`bash -x`).
+The script reuses exported credentials and asks locally only for missing values.
+Passwords entered at the prompt are hidden and are not saved. Do not run the
+script with shell tracing (`bash -x`).
+
+| Value | Preferred variable | Fallback variable |
+| --- | --- | --- |
+| Email | `AMERILINGUA_LOGIN` | `AMERILINGUA_EMAIL` |
+| Password | `AMERILINGUA_PASS` | `AMERILINGUA_PWD` |
+
+If your private `~/.env` defines `AMERILINGUA_EMAIL` and `AMERILINGUA_PWD`, export
+the assignments before launching the script. A subshell limits their lifetime:
+
+```bash
+(
+  set -a
+  source "$HOME/.env"
+  set +a
+  bash scripts/amerilingua.sh --output amerilingua_downloads
+)
+```
+
+Sourcing a file does not export plain assignments unless `set -a` is enabled or
+the file uses `export`. The launcher does not source files automatically. The
+preferred nonempty variable wins when both names exist; empty values fall back
+to the alias and then to a prompt. Never print the password to check it is loaded.
 
 Once that works, collect the catalogue:
 
@@ -54,7 +75,9 @@ The selectors and login field names were identified from the public catalogue
 and user-provided browser inspection on 2026-09-14. The tests use synthetic HTML
 and a local HTTP server, including CSRF/session continuity and HTML returned in
 place of a PDF. A successful authenticated run on the live site has **not** been
-verified: the remote inspection browser was blocked by Cloudflare.
+independently verified: the remote inspection browser was blocked by Cloudflare.
+A user reported `Scrape completed.` for a local `telling-time` run on 2026-09-14;
+the resulting files have not been independently inspected.
 
 If your local run is blocked by Cloudflare, requires a CAPTCHA/MFA, or uses a
 different sign-in method, this HTTP client cannot complete that flow. It does not
