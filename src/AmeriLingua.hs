@@ -106,7 +106,7 @@ parseResources parent tags = do
       refs = [map (attribute "href" . fst) (anchors item) | item <- items]
   when (null refs || any null refs || any (any (\ref -> null ref || "#" `isPrefixOf` ref)) refs) $
     Left "Lesson files are locked or missing; check AMERILINGUA_LOGIN/PASS and your subscription"
-  links <- nub <$> traverse resolve (concat refs)
+  links <- nub <$> traverse (resourceURL parent) (concat refs)
   let local = filter (sameOrigin parent) links
   when (null local) $ Left "No downloadable AmeriLingua PDF links found"
   unless (all (maybe False (isPrefixOf "/lesson-file/" . uriPath) . parseURI) local) $
@@ -115,13 +115,16 @@ parseResources parent tags = do
   unless (length (nub (map dest pdfs)) == length pdfs) $ Left "Different lesson files map to the same filename"
   pure (pdfs, links)
   where
-    resolve ref = do
-      address <- resolveURL parent ref
-      pure (address ++ maybe "" uriFragment (parseURIReference ref))
     pdfName address = let name = url_basename address in
       if ".pdf" `isSuffixOf` name then name
       else if "_file_pdf" `isSuffixOf` name then take (length name - length ("_file_pdf" :: String)) name ++ ".pdf"
       else name ++ ".pdf"
+
+-- | Resolve a resource link while retaining its client-side fragment.
+resourceURL :: URLString -> URLString -> Either String URLString
+resourceURL parent ref = do
+  address <- resolveURL parent ref
+  pure (address ++ maybe "" uriFragment (parseURIReference ref))
 
 -- | Reject HTML/login responses before any file or successful cache entry exists.
 copyPDF :: HTTP.BodyReader -> Handle -> IO ()

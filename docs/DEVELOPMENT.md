@@ -35,6 +35,7 @@ as errors, then runs the smoke test, generates API docs and creates a source arc
 | `Scrapper` | Login, binary download cache, tree traversal and checkpoints |
 | `Hafez` | Pure Hafez selectors and bilingual text output |
 | `AmeriLingua` | Catalogue pagination, pure resource selectors, PDF validation and link export |
+| `AmeriLinguaContent` | Lesson text, vocabulary/audio association, MP3/base64 validation and video URLs |
 | `app/Main.hs` | Argument parsing and process exit status |
 
 Keep site-specific logic in an adapter module. Prefer pure functions over extra
@@ -56,7 +57,9 @@ well. Keep dependency upgrades separate from unrelated parser or behavior change
 
 This is a sequential, finite-stage crawler, not a task queue. Checkpoints do not
 track hashes of the pipeline code or revalidate completed files. One output
-directory represents one source and one pipeline. The lock is for cooperating
+directory represents one source. Complementary pipelines may share it with distinct
+`finishedfile` checkpoint names, as the AmeriLingua PDF and content passes do.
+The lock is for cooperating
 processes, not a defense against another process deliberately changing files
 between filesystem checks. A forcibly terminated process may leave an empty lock
 and unused `.scraper-tmp*` files; normal exceptions clean up temporary files.

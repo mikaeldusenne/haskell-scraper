@@ -3,11 +3,14 @@ module Main (main) where
 
 import Control.Monad (unless, void)
 import qualified AmeriLingua as Ameri
+import qualified AmeriLinguaContent as Content
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.State.Strict (evalStateT, gets)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Base64 as Base64
 import Data.Either (isLeft)
 import Data.IORef
+import Data.List (isInfixOf)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import Hafez (extractLinks, parsePoem)
@@ -91,6 +94,30 @@ testAmeriLingua = do
     [ formToken "_token" (parseTags (token "fresh" ++ token "fresh")) == Right "fresh"
     , isLeft (formToken "_token" (parseTags (token "one" ++ token "two")))
     , isLeft (formToken "_token" [])
+    ]
+  content <- readTags "content.html"
+  assert "Lesson text, aligned audio links and complete video URLs" $
+    case Content.parseContent (origin ++ "/esl-lesson-plans/lesson-one") content of
+      Right parsed -> all (`isInfixOf` Content.markdown parsed)
+          ["Speaking: Explain a choice & compare ideas.", "First sentence.\n\nSecond sentence."
+          , "example [noun]: an illustration ([pronunciation](audio/211.mp3))"]
+        && not ("Unrelated comment" `isInfixOf` Content.markdown parsed)
+        && map dest (Content.audioFiles parsed) == ["audio/211.mp3", "audio/212.mp3"]
+        && Content.videoURLs parsed == ["https://player.vimeo.com/video/123456?app_id=1&h=synthetic#t=2s"]
+      Left _ -> False
+  let audio = "ID3\4\0\0synthetic"
+  assert "Optional media sections may be absent; a login page cannot complete content" $ and
+    [ case Content.parseContent origin (parseTags "<div class='content-item'><h2>Lesson Objectives</h2><div class='desc'>Speak clearly.</div></div>") of
+        Right parsed -> null (Content.audioFiles parsed) && null (Content.videoURLs parsed)
+        Left _ -> False
+    , isLeft (Content.parseContent origin (parseTags "<form>Log in</form>"))
+    ]
+  assert "Raw and base64 MP3s accepted; HTML and corrupt audio rejected" $ and
+    [ Content.decodeAudio audio == Right audio
+    , Content.decodeAudio (Base64.encode audio <> "\r\n") == Right audio
+    , isLeft (Content.decodeAudio "<html>Log in</html>")
+    , isLeft (Content.decodeAudio (Base64.encode "<html>Log in</html>"))
+    , isLeft (Content.decodeAudio "%%invalid%%")
     ]
 
 testResume :: IO ()

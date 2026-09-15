@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add `amerilingua-content` to enrich existing PDF folders with objectives,
+  transcripts, vocabulary, pronunciation MP3s and video URLs, using separate checkpoints.
+- Add a resumable yt-dlp video launcher with per-lesson referers and archives.
 - Add the `amerilingua` adapter: catalogue pagination, all lesson PDFs, resource
   links (including Google Slides), and single-lesson downloads.
 - Support fresh hidden CSRF form tokens and session cookies during login.
