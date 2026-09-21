@@ -21,6 +21,8 @@ jobs:
             ~/.stack
             .stack-work
           key: stack-${{ runner.os }}-${{ hashFiles('stack.yaml', 'stack.yaml.lock', 'package.yaml') }}
+          restore-keys: |
+            stack-${{ runner.os }}-
       - name: Use the installed GHC for every Stack invocation
         run: |
           stack config set system-ghc true --global

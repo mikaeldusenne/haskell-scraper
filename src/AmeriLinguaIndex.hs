@@ -117,7 +117,7 @@ directory root path = do
   let relative = makeRelative root path
   unless (path == root || safeRelative relative) $ ioError (userError "Navigation directory escapes the catalogue")
   mapM_ (\part -> checkOutput root part >> createDirectoryIfMissing False part)
-    (tail (scanl (</>) root (filter (/= ".") (splitDirectories relative))))
+    (drop 1 (scanl (</>) root (filter (/= ".") (splitDirectories relative))))
 
 -- | Idempotent relative links; never replace a regular file or a different link.
 linkLesson :: FilePath -> FilePath -> FilePath -> IO ()
