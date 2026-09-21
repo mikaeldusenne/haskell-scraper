@@ -16,6 +16,8 @@
 - Add a local credential prompt and focused offline/loopback coverage.
 - Trim surrounding whitespace in AmeriLingua links before URL and fragment parsing,
   fixing `Invalid URL reference` on lessons such as `who-said-that`.
+- Add `amerilingua-index`: lesson metadata JSON, authored Lesson Sequences and
+  relative symlink navigation by category, level, topic, grammar, focus and media.
 
 ## 0.2.0.0
 

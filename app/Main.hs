@@ -3,6 +3,7 @@ module Main (main) where
 import Control.Monad (foldM, unless)
 import qualified AmeriLingua
 import qualified AmeriLinguaContent
+import qualified AmeriLinguaIndex
 import Data.Version (showVersion)
 import Hafez (fs)
 import Paths_haskellwebscrapper (version)
@@ -30,7 +31,7 @@ options =
       _ -> Left ("Expected a nonnegative integer, got: " ++ value)
 
 usage :: String
-usage = usageInfo "Usage: haskellwebscrapper-exe (hafez|amerilingua|amerilingua-content) [OPTIONS]\n       haskellwebscrapper-exe --help | --version\n\nhafez: English/Farsi poems. amerilingua: lesson PDFs and resource links.\namerilingua-content: objectives, transcript, vocabulary, audio and video URLs.\nAmeriLingua login: AMERILINGUA_LOGIN/PASS (see docs/AMERILINGUA.md).\nNo arguments prints help without crawling.\n" options
+usage = usageInfo "Usage: haskellwebscrapper-exe (hafez|amerilingua|amerilingua-content|amerilingua-index) [OPTIONS]\n       haskellwebscrapper-exe --help | --version\n\nhafez: English/Farsi poems. amerilingua: lesson PDFs and resource links.\namerilingua-content: objectives, transcript, vocabulary, audio and video URLs.\namerilingua-index: metadata, ordered sequences and tag navigation.\nAmeriLingua login: AMERILINGUA_LOGIN/PASS (see docs/AMERILINGUA.md).\nNo arguments prints help without crawling.\n" options
 
 run :: Config -> (Config -> [Stage]) -> [String] -> IO ()
 run _ _ ["--help"] = putStrLn usage
@@ -55,4 +56,5 @@ main = do
       (const fs) rest
     "amerilingua" : rest -> run AmeriLingua.config AmeriLingua.stages rest
     "amerilingua-content" : rest -> run AmeriLinguaContent.config AmeriLinguaContent.stages rest
+    "amerilingua-index" : rest -> run AmeriLinguaIndex.config AmeriLinguaIndex.stages rest
     _ -> die usage
