@@ -160,11 +160,12 @@ ff node (stage : rest) = do
     io $ createDirectoryIfMissing True directory
     io $ checkOutput (download_folder cfg) marker
     done <- io $ doesFileExist marker
-    if done
-      then do
-        previous <- io $ BS.readFile marker
-        unless (previous == identity) $ throwE "Completion marker belongs to a different URL or pipeline; choose a new output directory"
-        pure []
+    when done $ do
+      previous <- io $ BS.readFile marker
+      unless (previous == identity) $ throwE "Completion marker belongs to a different URL or pipeline; choose a new output directory"
+      when (refresh_completed cfg) $ io $ removeFile marker
+    if done && not (refresh_completed cfg)
+      then pure []
       else do
         children <- ExceptT $ first snd <$> retry (retry_count cfg) (url node) (attempt stage node)
         when (null children && not (null rest)) $ throwE "No child links found before the final stage"

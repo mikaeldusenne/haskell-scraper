@@ -82,11 +82,20 @@ content command also works without an earlier PDF crawl. It prints each lesson
 being processed; rerunning the same command skips completed content and reuses
 cached MP3s from an interrupted lesson.
 
+To enrich a catalogue completed before Audio sections were supported, add
+`--refresh` to the same `amerilingua-content` command. This revisits lesson pages
+and updates `lesson.md` and `video-urls.txt`, keeping changed old versions in each
+lesson's `.scraper-content-backups/` directory. Local edits to those two files are
+also backed up before replacement. PDFs, cached pronunciation MP3s and downloaded
+videos are reused. If interrupted, rerun with `--refresh`; an ordinary run still
+skips completed lessons. The option revisits checkpoints for the selected command;
+only `amerilingua-content` opts into replacing generated text.
+
 | Output within each lesson folder | Contents |
 | --- | --- |
-| `lesson.md` | Lesson Objectives, video description/link, Video Transcript, vocabulary definitions and local pronunciation links |
+| `lesson.md` | Lesson Objectives, Video/Audio descriptions and links, Video/Audio Transcript, vocabulary definitions and local pronunciation links |
 | `audio/<id>.mp3` | Pronunciation clips associated with vocabulary entries |
-| `video-urls.txt` | Video player/source URLs, preserving their query and fragment |
+| `video-urls.txt` | Video **and Audio** player/source URLs, preserving their query and fragment; filename kept for compatibility |
 
 Sections absent from a lesson are omitted. Present but empty sections fail
 explicitly, as does a page with none of the supported section headings. Audio
@@ -94,7 +103,7 @@ responses can be raw MP3 or base64-encoded MP3; encoded input is capped at 10 Mi
 HTML, invalid base64 and unrecognized audio headers are rejected before committing
 a file or cache entry. Header checks do not constitute a full media integrity check.
 
-### Download the videos
+### Download videos and lesson audio
 
 The video in the inspected lesson is a Vimeo embed. Run the separate downloader
 after the content pass; it reads `video-urls.txt` and uses each lesson's `source.txt`
@@ -113,7 +122,11 @@ Videos are saved under each lesson's `video/` directory. yt-dlp's per-lesson
 `video/archive.txt` records completed video IDs, and partial downloads can resume.
 The script refuses overwrites, uses the crawler's output lock and returns a failure
 status if a download fails; rerun the same command to retry. Google Slides remain
-links in `links.txt`; this script processes only the lesson's video section.
+links in `links.txt`. Both the **Video** and **Audio** sections feed this script.
+An Audio-labelled Vimeo player is saved in `video/` in the provider's media format,
+including its visual track if present; it is not converted to a pronunciation MP3.
+Native `<audio src>` and `<audio><source src>` links are also collected. The
+`audio/` directory remains reserved for vocabulary pronunciation clips.
 
 Video requests go to the external provider through yt-dlp. AmeriLingua's in-memory
 cookies are not forwarded. Access depends on the provider accepting the embed and
