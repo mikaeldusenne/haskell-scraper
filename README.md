@@ -136,6 +136,10 @@ It maintains separate completion checkpoints. A companion yt-dlp script download
 the saved video URLs; see [content and media](docs/AMERILINGUA.md#add-objectives-transcripts-vocabulary-and-media)
 for commands, output files and the Arch Linux packages.
 
+For AmeriLingua, `amerilingua-index` adds metadata, the site's ordered Lesson
+Sequences and tag navigation using relative symlinks over the existing flat
+catalogue. See the [catalogue navigation guide](docs/AMERILINGUA-INDEX.md).
+
 ## Resume and preserve your files
 
 Use the **same command and output directory** to resume. Each node's
