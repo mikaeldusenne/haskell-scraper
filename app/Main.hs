@@ -22,6 +22,7 @@ options =
   , Option [] ["delay-ms"] (ReqArg (number (\n cfg -> cfg {request_delay_ms = n})) "N") "Delay before each request (default: 1000)"
   , Option [] ["retries"] (ReqArg (number (\n cfg -> cfg {retry_count = n})) "N") "Extra attempts per failed stage (default: 2)"
   , Option [] ["timeout-seconds"] (ReqArg (number (\n cfg -> cfg {timeout_seconds = n})) "N") "HTTP response timeout (default: 30; must be positive)"
+  , Option [] ["refresh"] (NoArg (\cfg -> Right cfg {refresh_completed = True})) "Revisit completed nodes; content text is backed up before updates"
   ]
   where
     number set value cfg = case readMaybe value of

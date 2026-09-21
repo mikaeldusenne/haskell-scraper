@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
--- | Add lesson text, pronunciation MP3s and stable video links to an existing crawl.
+-- | Add lesson text, pronunciation MP3s and stable media links to an existing crawl.
 module AmeriLinguaContent where
 
 import qualified AmeriLingua as Ameri
@@ -38,7 +38,7 @@ stages cfg = if Ameri.isLesson (base cfg) then [saveContent] else [Ameri.findLes
 data Content = Content
   { markdown :: String
   , audioFiles :: [UrlWithDest]
-  , videoURLs :: [URLString]
+  , videoURLs :: [URLString] -- ^ Both Video and Audio embeds; name retained for compatibility.
   } deriving (Eq, Show)
 
 -- | Plain text with paragraph/list breaks; omit scripts and player controls.
@@ -63,7 +63,7 @@ parseContent parent tags = do
   let sections = [(plain heading, concat (Ameri.blocks ["desc"] children))
         | children <- Ameri.blocks ["content-item"] (tagTree tags)
         , TagBranch "h2" _ heading <- children
-        , plain heading `elem` ["Lesson Objectives", "Video", "Video Transcript", "Vocabulary and Pronunciation"]]
+        , plain heading `elem` ["Lesson Objectives", "Video", "Video Transcript", "Audio", "Audio Transcript", "Vocabulary and Pronunciation"]]
   when (null sections) $ Left "No supported lesson content sections; check the session and content-item layout"
   rendered <- traverse section sections
   let audios = nub (concatMap (\(_, files, _) -> files) rendered)
@@ -75,19 +75,19 @@ parseContent parent tags = do
       let players = [(plain children, Ameri.attribute "data-play" attrs)
             | TagBranch _ _ children <- universeTree trees, TagBranch _ attrs _ <- children
             , "audio-player" `elem` words (Ameri.attribute "class" attrs)]
-          media = [attrs | TagBranch name attrs _ <- universeTree trees, name `elem` ["iframe", "video", "source"]]
+          media = [attrs | TagBranch name attrs _ <- universeTree trees, name `elem` ["iframe", "video", "audio", "source"]]
                ++ [attrs | TagLeaf (TagOpen name attrs) <- universeTree trees, name == "source"]
           refs = [Ameri.attribute "src" attrs | attrs <- media, not (null (Ameri.attribute "src" attrs))]
       when (any (null . fst) players) $ Left "Pronunciation player has no vocabulary label"
       audios <- traverse (pronunciation . snd) players
-      videos <- if heading == "Video" then nub <$> traverse (Ameri.resourceURL parent) refs else Right []
-      when (heading == "Video" && null videos) $ Left "Video section has no supported media URL"
+      videos <- if heading `elem` ["Video", "Audio"] then nub <$> traverse (Ameri.resourceURL parent) refs else Right []
+      when (heading `elem` ["Video", "Audio"] && null videos) $ Left (heading ++ " section has no supported media URL")
       let body = if heading == "Vocabulary and Pronunciation" && not (null players)
                  then unlines ["- " ++ unwords (words label) ++ " ([pronunciation](" ++ dest file ++ "))"
                        | ((label, _), file) <- zip players audios]
                  else plain trees
       when (null body && null videos) $ Left ("Empty lesson section: " ++ heading)
-      pure ("## " ++ heading ++ "\n\n" ++ body ++ "\n\n" ++ concatMap (\address -> "Video: " ++ address ++ "\n\n") videos, audios, videos)
+      pure ("## " ++ heading ++ "\n\n" ++ body ++ "\n\n" ++ concatMap (\address -> heading ++ ": " ++ address ++ "\n\n") videos, audios, videos)
     pronunciation ref = do
       address <- resolveURL parent ref
       unless (sameOrigin parent address) $ Left "Pronunciation link leaves the lesson origin"
@@ -126,7 +126,10 @@ saveContent node = runExceptT $ do
   content <- either throwE pure (parseContent (url node) tags)
   mapM_ (\file -> ExceptT (downloadWith copyAudio file {dest = dest node </> dest file})) (audioFiles content)
   root <- lift (gets download_folder)
+  refresh <- lift (gets refresh_completed)
+  let writeContent = if refresh then writeOutputBackup else writeOutput
+  ExceptT $ liftIO $ ioEither $ writeOutput root (dest node </> "source.txt") (T.encodeUtf8 (T.pack (url node ++ "\n")))
   ExceptT $ liftIO $ ioEither $ mapM_ (\(name, value) ->
-    writeOutput root (dest node </> name) (T.encodeUtf8 (T.pack value)))
-    [("lesson.md", markdown content), ("video-urls.txt", unlines (videoURLs content)), ("source.txt", url node ++ "\n")]
+    writeContent root (dest node </> name) (T.encodeUtf8 (T.pack value)))
+    [("lesson.md", markdown content), ("video-urls.txt", unlines (videoURLs content))]
   pure []

@@ -109,6 +109,21 @@ writeOutput root path bytes = do
       unless (previous == bytes) $ ioError (userError ("Refusing to overwrite different content: " ++ path))
     else atomicWrite path (`BS.hPut` bytes)
 
+-- | Replace generated text only on an explicit refresh, retaining each old version.
+writeOutputBackup :: FilePath -> FilePath -> BS.ByteString -> IO ()
+writeOutputBackup root path bytes = do
+  checkOutput root path
+  exists <- doesFileExist path
+  if not exists then writeOutput root path bytes else do
+    previous <- BS.readFile path
+    unless (previous == bytes) $ do
+      let directory = takeDirectory path </> ".scraper-content-backups"
+          backup = directory </> takeFileName path ++ "." ++ showDigest (sha256 (LB.fromStrict previous))
+      checkOutput root directory
+      createDirectoryIfMissing True directory
+      writeOutput root backup previous
+      atomicWrite path (`BS.hPut` bytes)
+
 -- | Millisecond delay with checked conversion to the runtime's microseconds.
 pause :: Int -> IO ()
 pause ms = threadDelay (fromInteger (min (toInteger (maxBound :: Int)) (1000 * toInteger ms)))

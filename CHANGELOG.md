@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Include Audio and Audio Transcript sections, native audio sources and Vimeo
+  audio embeds in content exports and the existing media downloader.
+- Add `--refresh` to revisit completed nodes; content exports back up changed
+  Markdown/manifests while reusing downloaded files.
 - Add `amerilingua-content` to enrich existing PDF folders with objectives,
   transcripts, vocabulary, pronunciation MP3s and video URLs, using separate checkpoints.
 - Add a resumable yt-dlp video launcher with per-lesson referers and archives.

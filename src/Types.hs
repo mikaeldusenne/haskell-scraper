@@ -45,6 +45,7 @@ data Config = Config
   , login_needed_tag :: Tag String
   , urlsfile :: Path
   , finishedfile :: Path
+  , refresh_completed :: Bool
   , alreadies_urls :: Cache
   , request_delay_ms :: Int
   , retry_count :: Int
@@ -66,6 +67,7 @@ defaultconfig = Config
   , login_needed_tag = TagOpen "button" [("aria-label", "Please sign in")]
   , urlsfile = ".scraper-urls"
   , finishedfile = ".scraper-finished"
+  , refresh_completed = False
   , alreadies_urls = []
   , request_delay_ms = 1000
   , retry_count = 2
