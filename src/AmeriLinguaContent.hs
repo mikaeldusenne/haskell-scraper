@@ -81,8 +81,9 @@ parseContent parent tags = do
       when (any (null . fst) players) $ Left "Pronunciation player has no vocabulary label"
       audios <- traverse (pronunciation . snd) players
       videos <- if heading `elem` ["Video", "Audio"] then nub <$> traverse (Ameri.resourceURL parent) refs else Right []
-      when (heading `elem` ["Video", "Audio"] && null videos) $ Left (heading ++ " section has no supported media URL")
-      let body = if heading == "Vocabulary and Pronunciation" && not (null players)
+      when (null videos && (heading == "Video" || (heading == "Audio" && null audios))) $
+        Left (heading ++ " section has no supported media URL")
+      let body = if heading `elem` ["Vocabulary and Pronunciation", "Audio"] && not (null players)
                  then unlines ["- " ++ unwords (words label) ++ " ([pronunciation](" ++ dest file ++ "))"
                        | ((label, _), file) <- zip players audios]
                  else plain trees

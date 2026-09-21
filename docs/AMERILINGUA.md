@@ -103,6 +103,32 @@ responses can be raw MP3 or base64-encoded MP3; encoded input is capped at 10 Mi
 HTML, invalid base64 and unrecognized audio headers are rejected before committing
 a file or cache entry. Header checks do not constitute a full media integrity check.
 
+An **Audio** heading can also contain vocabulary pronunciation players instead
+of an embedded lesson recording (for example, `seeking-advice`). Their
+`data-play` URLs use the authenticated MP3 downloader, with definitions and local
+audio links in `lesson.md`; they do not require yt-dlp. A section without either
+valid pronunciation players or a supported media source still fails.
+
+If an earlier version reported `Audio section has no supported media URL` for
+such a lesson, update the scraper and resume **without `--refresh`** to skip the
+completed lessons. An older `lesson.md` may predate Audio support; preserve that
+file before resuming so the new export can be written:
+
+```bash
+catalogue="amerilingua_catalogue" # use your existing output directory
+if [ -f "$catalogue/seeking-advice/lesson.md" ]; then
+  mv --backup=numbered -- "$catalogue/seeking-advice/lesson.md" \
+    "$catalogue/seeking-advice/lesson.md.before-audio-fix"
+fi
+# With the same credentials exported as for the previous run:
+PATH="$HOME/.ghcup/bin:$PATH" \
+"$HOME/.ghcup/bin/stack" run -- amerilingua-content --output "$catalogue"
+```
+
+The backup command uses GNU `mv` (available on Arch Linux); it preserves existing
+backups too. Keep the original catalogue URL and root so checkpoints and the MP3
+cache remain shared. PDF files and completion markers do not need to be removed.
+
 ### Download videos and lesson audio
 
 The video in the inspected lesson is a Vimeo embed. Run the separate downloader
@@ -122,7 +148,8 @@ Videos are saved under each lesson's `video/` directory. yt-dlp's per-lesson
 `video/archive.txt` records completed video IDs, and partial downloads can resume.
 The script refuses overwrites, uses the crawler's output lock and returns a failure
 status if a download fails; rerun the same command to retry. Google Slides remain
-links in `links.txt`. Both the **Video** and **Audio** sections feed this script.
+links in `links.txt`. Media embeds/sources from both **Video** and **Audio** sections
+feed this script; vocabulary `data-play` clips are downloaded by the content pass.
 An Audio-labelled Vimeo player is saved in `video/` in the provider's media format,
 including its visual track if present; it is not converted to a pronunciation MP3.
 Native `<audio src>` and `<audio><source src>` links are also collected. The

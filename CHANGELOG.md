@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Accept vocabulary pronunciation players under an Audio heading and link their
+  authenticated MP3 downloads in the lesson export.
 - Include Audio and Audio Transcript sections, native audio sources and Vimeo
   audio embeds in content exports and the existing media downloader.
 - Add `--refresh` to revisit completed nodes; content exports back up changed
