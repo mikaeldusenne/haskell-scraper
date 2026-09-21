@@ -155,6 +155,8 @@ discover node = runExceptT $ do
   ExceptT $ liftIO $ ioEither $ do
     directory root index
     mapM_ (directory root . (index </>) . ("tags" </>)) facets
+    -- Validate all ancestors before the generic crawler creates sequence nodes.
+    mapM_ (directory root . (root </>) . dest) sequences
     writeText root (index </> "catalogue-urls.txt") (unlines (map url lessons))
     writeText root (index </> "README.md") $ "# AmeriLingua catalogue\n\nSource: " ++ url node
       ++ "\n\n## Tags\n\n" ++ unlines ["- [" ++ key ++ "](tags/" ++ key ++ "/)" | key <- facets]
