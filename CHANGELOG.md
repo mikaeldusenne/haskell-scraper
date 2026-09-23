@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Generate a standalone `index.html` catalogue with searchable multi-select
+  metadata facets and local lesson links; no HTTP server or extra command needed.
 - Accept vocabulary pronunciation players under an Audio heading and link their
   authenticated MP3 downloads in the lesson export.
 - Include Audio and Audio Transcript sections, native audio sources and Vimeo
