@@ -251,7 +251,7 @@ readLesson root address = do
   unless (saved == T.encodeUtf8 (T.pack (address ++ "\n"))) $
     ioError (userError ("Indexed lesson belongs to another URL: " ++ folder))
   bytes <- BS.readFile metadata
-  entry <- either (ioError . userError . ("Invalid lesson metadata " ++ folder ++ ": " ++)) pure
+  entry <- either (\err -> ioError (userError ("Invalid lesson metadata " ++ folder ++ ": " ++ err))) pure
     (eitherDecodeStrict' bytes)
   let fields = withObject "lesson metadata" $ \o ->
         (,) <$> o .: "title" <*> o .: "source"
