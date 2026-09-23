@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Catalogue AmeriLingua</title>
+  <style>
+    :root { color-scheme: light; font: 16px/1.5 system-ui, sans-serif; color: #233246; background: #f5f7fb; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    a { color: #164b94; }
+    a:hover { text-decoration-thickness: 2px; }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    header { padding: 2rem max(1.25rem, calc((100vw - 1200px) / 2)); color: white; background: #173d70; }
+    h1 { margin: 0; font-size: clamp(1.7rem, 3vw, 2.4rem); }
+    header p { margin: .4rem 0 0; color: #e2edff; }
+    main { max-width: 1200px; margin: 1.5rem auto; padding: 0 1.25rem; display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+    aside, .lesson { background: white; border: 1px solid #dce3ef; border-radius: .75rem; }
+    aside { padding: 1rem; }
+    aside h2, #results h2 { margin: 0 0 .8rem; font-size: 1.1rem; }
+    input[type="search"] { width: 100%; padding: .6rem .7rem; border: 1px solid #aebbd0; border-radius: .4rem; }
+    input:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid #e49736; outline-offset: 2px; }
+    #reset { margin: .85rem 0 .3rem; padding: .35rem .7rem; border: 1px solid #b7c7df; border-radius: .4rem; background: #f2f6fd; color: #173d70; }
+    details { border-top: 1px solid #e3e8f1; padding: .65rem 0; }
+    summary { cursor: pointer; font-weight: 650; }
+    .selected-count { font-size: .8rem; color: #496582; }
+    .facet-search { margin: .6rem 0; }
+    .options { max-height: 14rem; overflow: auto; }
+    .option { display: flex; align-items: baseline; gap: .45rem; margin: .25rem 0; cursor: pointer; }
+    .option input { flex: none; }
+    .option span { min-width: 0; overflow-wrap: anywhere; }
+    .option small { margin-left: auto; color: #586c84; }
+    .option:has(input:disabled) { color: #66788e; cursor: default; }
+    .help { font-size: .85rem; color: #52647b; }
+    #results h2 { margin: .15rem 0 1rem; }
+    #lessons { display: grid; gap: .75rem; }
+    .lesson { padding: 1rem 1.1rem; }
+    .lesson h3 { margin: 0 0 .45rem; font-size: 1.1rem; }
+    .tags, .links { display: flex; flex-wrap: wrap; gap: .35rem .8rem; }
+    .tags { margin-bottom: .5rem; }
+    .tags span { padding: .1rem .5rem; border-radius: 1rem; background: #e9f1fc; color: #244669; font-size: .8rem; }
+    .links { font-size: .87rem; }
+    #empty { padding: 1rem; background: white; border-radius: .75rem; }
+    [hidden] { display: none !important; }
+    @media (max-width: 750px) { main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Catalogue AmeriLingua</h1>
+    <p>Cours enregistrés dans ce dossier · consultation hors ligne, sans serveur</p>
+  </header>
+  <main>
+    <aside aria-label="Filtres">
+      <h2>Rechercher et filtrer</h2>
+      <input id="search" type="search" placeholder="Titre, tag ou identifiant" aria-label="Rechercher un cours">
+      <button id="reset" type="button">Effacer les filtres</button>
+      <p class="help">Plusieurs choix dans une facette : OU. Entre facettes : ET.</p>
+      <div id="facets"></div>
+    </aside>
+    <section id="results" aria-label="Cours">
+      <h2 id="count" aria-live="polite"></h2>
+      <div id="lessons"></div>
+      <p id="empty" hidden>Aucun cours ne correspond à ces filtres.</p>
+    </section>
+  </main>
+  <noscript>Activez JavaScript pour filtrer ce catalogue local. Les fichiers des cours restent accessibles dans leurs dossiers.</noscript>
+  <!-- CATALOGUE_DATA -->
+  <script>
+    "use strict";
+    const facets = {category: "Catégorie", level: "Niveau", topic: "Sujet", grammar: "Grammaire", focus: "Compétences", media: "Média"};
+    const keys = Object.keys(facets);
+    const lessons = JSON.parse(document.getElementById("catalogue-data").textContent)
+      .sort((a, b) => a.metadata.title.localeCompare(b.metadata.title, "fr"));
+    const picked = Object.fromEntries(keys.map(key => [key, new Set()]));
+    const options = Object.fromEntries(keys.map(key => [key,
+      [...new Set(lessons.flatMap(lesson => lesson.metadata[key] || []))].sort((a, b) => a.localeCompare(b, "fr"))]));
+    const search = document.getElementById("search");
+    const normalize = value => String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr");
+    const tags = (lesson, key) => lesson.metadata[key] || [];
+    const matches = (lesson, except) => {
+      const text = [lesson.metadata.title, lesson.metadata.lesson_id, ...keys.flatMap(key => tags(lesson, key))];
+      return text.some(value => normalize(value).includes(normalize(search.value.trim()))) &&
+        keys.every(key => key === except || !picked[key].size || tags(lesson, key).some(tag => picked[key].has(tag)));
+    };
+
+    const element = (name, content, className) => {
+      const node = document.createElement(name);
+      node.textContent = content;
+      if (className) node.className = className;
+      return node;
+    };
+    const link = (label, href) => {
+      const node = element("a", label);
+      node.href = href;
+      node.target = "_blank";
+      node.rel = "noopener noreferrer";
+      return node;
+    };
+    const local = lesson => `./${encodeURIComponent(lesson.folder)}/`;
+
+    for (const key of keys) {
+      const details = document.createElement("details");
+      details.id = `facet-${key}`;
+      const summary = element("summary", facets[key]);
+      const selected = element("span", "", "selected-count");
+      summary.append(" ", selected);
+      const finder = document.createElement("input");
+      finder.type = "search";
+      finder.className = "facet-search";
+      finder.placeholder = "Chercher un tag";
+      finder.setAttribute("aria-label", `Chercher dans ${facets[key]}`);
+      finder.addEventListener("input", () => renderFacet(key));
+      const list = element("div", "", "options");
+      list.addEventListener("change", event => {
+        const tag = event.target.value;
+        if (event.target.checked) picked[key].add(tag);
+        else picked[key].delete(tag);
+        render();
+      });
+      details.append(summary, finder, list);
+      document.getElementById("facets").append(details);
+    }
+
+    function renderFacet(key) {
+      const container = document.getElementById(`facet-${key}`);
+      const counts = new Map();
+      for (const lesson of lessons.filter(item => matches(item, key))) {
+        for (const tag of tags(lesson, key)) counts.set(tag, (counts.get(tag) || 0) + 1);
+      }
+      const query = normalize(container.querySelector(".facet-search").value.trim());
+      const list = container.querySelector(".options");
+      const rows = options[key].filter(tag => normalize(tag).includes(query)).map(tag => {
+        const label = element("label", "", "option");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = tag;
+        checkbox.checked = picked[key].has(tag);
+        checkbox.disabled = !counts.get(tag) && !checkbox.checked;
+        label.append(checkbox, element("span", tag), element("small", String(counts.get(tag) || 0)));
+        return label;
+      });
+      list.replaceChildren(...rows);
+      container.querySelector(".selected-count").textContent = picked[key].size ? `(${picked[key].size})` : "";
+    }
+
+    function render() {
+      const visible = lessons.filter(lesson => matches(lesson));
+      document.getElementById("count").textContent = `${visible.length} cours sur ${lessons.length}`;
+      document.getElementById("empty").hidden = visible.length !== 0;
+      const cards = visible.map(lesson => {
+        const card = element("article", "", "lesson");
+        const title = document.createElement("h3");
+        title.append(link(lesson.metadata.title, local(lesson)));
+        const badges = element("div", "", "tags");
+        for (const key of ["category", "level"]) {
+          for (const tag of tags(lesson, key)) badges.append(element("span", tag));
+        }
+        const actions = element("div", "", "links");
+        actions.append(link("Dossier local", local(lesson)),
+          link("Métadonnées", `${local(lesson)}metadata.json`), link("Page d’origine", lesson.metadata.source));
+        card.append(title, badges, actions);
+        return card;
+      });
+      document.getElementById("lessons").replaceChildren(...cards);
+      keys.forEach(renderFacet);
+    }
+
+    search.addEventListener("input", render);
+    document.getElementById("reset").addEventListener("click", () => {
+      search.value = "";
+      keys.forEach(key => {
+        picked[key].clear();
+        document.getElementById(`facet-${key}`).querySelector(".facet-search").value = "";
+      });
+      render();
+    });
+    render();
+  </script>
+</body>
+</html>

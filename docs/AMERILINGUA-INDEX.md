@@ -5,6 +5,12 @@ relative directory symlinks. It fetches HTML only, using the same login, request
 delay, retries and output lock as the other AmeriLingua commands. Lesson folders,
 PDFs, Markdown and downloaded media stay in place.
 
+It also writes `index.html` at the **catalogue root**. Open that file directly
+in Firefox or another browser (`file://`): title and tag search, multi-select
+facets and links to local course folders work without a web server. The page
+contains its JSON and JavaScript inline; it makes no background HTTP requests.
+Clicking “Page d’origine” deliberately opens the AmeriLingua website.
+
 From the repository directory, use the **same catalogue URL and output directory**
 as your previous crawl:
 
@@ -28,6 +34,7 @@ PDFs and media remains a separate command.
 
 | Path relative to the catalogue | Purpose |
 | --- | --- |
+| `index.html` | Offline browser page with title search and Category, Level, Topic, Grammar, Focus and Media filters |
 | `<lesson>/metadata.json` | Title, source URL, Category, Level, Topic, Grammar, Focus, Media, Lesson ID and Lesson Time when present |
 | `_navigation/README.md` | Entry point to tags and sequences |
 | `_navigation/tags/category/Business_English/<lesson>` | Relative symlink to the original lesson folder |
@@ -41,6 +48,11 @@ Tags cover **category, level, topic, grammar, focus and media**. Comma-separated
 values become separate tags and JSON arrays; Lesson ID and Lesson Time remain
 strings. Missing optional fields are omitted. Category, Level and the lesson title
 are required so a changed page layout cannot silently produce an empty index.
+Selecting multiple values in one facet uses OR; filters from different facets and
+the text search combine with AND. Each tag count is computed with the other
+facets and the current text search applied. Results link to the lesson directory,
+its `metadata.json` and its original online page. Directory links also work when
+the catalogue has metadata but no PDF or Markdown downloads.
 Folder labels replace punctuation/spaces with underscores; `label.txt` preserves
 the exact tag value and detects naming collisions.
 
@@ -61,6 +73,15 @@ checkpoints retain completed lessons and sequences; identical symlinks are safe
 to reuse. Existing files, different symlinks and changed JSON/index text are never
 silently replaced. The index is a snapshot; completed indexes are not automatically
 refreshed when the website changes.
+
+If you already ran `amerilingua-index` before the HTML page was added, rerun the
+**same command with the same output directory**, without `--refresh`. Completed
+lesson pages are skipped, and `index.html` is generated from the local
+`metadata.json` files. The command still signs in once at startup, so keep the
+same login environment variables. If the index is incomplete, finish its crawl
+first; a missing or mismatched metadata file stops HTML generation. An existing
+different `index.html` is preserved and reported as an error. Back it up or
+rename it yourself before regenerating a changed snapshot.
 
 The links work directly on Arch Linux and remain valid if you move the **whole
 catalogue** together. Copy tools must preserve symlinks rather than dereference

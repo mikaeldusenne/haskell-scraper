@@ -9,18 +9,21 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT, throwE)
 import Control.Monad.Trans.State.Strict (gets)
-import Data.Aeson (encode, object, (.=))
+import Data.Aeson (Value, encode, eitherDecodeStrict', object, withObject, (.:), (.:?), (.!=), (.=))
+import Data.Aeson.Types (parseEither)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LB
 import Data.List (isPrefixOf, nub)
 import Data.String (fromString)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import qualified Data.Text.IO as TIO
 import Network.URI (parseURIReference, uriPath)
 import System.Directory
 import System.FilePath
 import System.IO (hPutStrLn, stderr)
 import System.IO.Error (catchIOError, isDoesNotExistError)
+import Paths_haskellwebscrapper (getDataFileName)
 import Text.HTML.TagSoup (Tag (..))
 import Text.HTML.TagSoup.Tree (TagTree (..), tagTree, universeTree)
 import Text.Printf (printf)
@@ -218,3 +221,42 @@ saveSequence root node (Sequence title introduction entries) = do
       pure ("## " ++ heading ++ "\n\n"
         ++ (if local then "[Local lesson](" ++ name ++ "/) · " else "Not in this catalogue. ")
         ++ "[Online lesson](" ++ address ++ ")\n\n" ++ description ++ "\n\n")
+
+-- | Embed the indexed JSON in a standalone page; file:// browsers cannot fetch it.
+writePage :: Config -> IO ()
+writePage cfg = do
+  root <- canonicalizePath (download_folder cfg)
+  let catalogue = root </> navigation </> "catalogue-urls.txt"
+  checkOutput root catalogue
+  addresses <- lines . T.unpack . T.decodeUtf8 <$> BS.readFile catalogue
+  when (null addresses) $ ioError (userError "Catalogue has no indexed lessons")
+  lessons <- traverse (readLesson root) addresses
+  template <- getDataFileName "assets/amerilingua-catalogue.html" >>= TIO.readFile
+  let marker = "<!-- CATALOGUE_DATA -->"
+  unless (T.count marker template == 1) $ ioError (userError "Invalid catalogue page template")
+  -- Escaping '<' prevents lesson metadata from terminating the JSON script element.
+  let payload = T.replace "<" "\\u003c" (T.decodeUtf8 (LB.toStrict (encode lessons)))
+      page = T.replace marker ("<script id=\"catalogue-data\" type=\"application/json\">" <> payload <> "</script>") template
+  writeOutput root (root </> "index.html") (T.encodeUtf8 page)
+
+readLesson :: FilePath -> URLString -> IO Value
+readLesson root address = do
+  let folder = url_basename address
+      source = root </> folder </> "source.txt"
+      metadata = root </> folder </> "metadata.json"
+  unless (safeRelative folder && takeFileName folder == folder) $
+    ioError (userError ("Unsafe indexed lesson folder: " ++ folder))
+  mapM_ (checkOutput root) [source, metadata]
+  saved <- BS.readFile source
+  unless (saved == T.encodeUtf8 (T.pack (address ++ "\n"))) $
+    ioError (userError ("Indexed lesson belongs to another URL: " ++ folder))
+  bytes <- BS.readFile metadata
+  entry <- either (\err -> ioError (userError ("Invalid lesson metadata " ++ folder ++ ": " ++ err))) pure
+    (eitherDecodeStrict' bytes)
+  let fields = withObject "lesson metadata" $ \o ->
+        (,) <$> o .: "title" <*> o .: "source"
+          <* traverse (\key -> o .:? fromString key .!= ([] :: [String])) facets
+  case (parseEither fields entry :: Either String (String, String)) of
+    Right (title, origin) | not (null title) && origin == address ->
+      pure (object ["folder" .= folder, "metadata" .= entry])
+    _ -> ioError (userError ("Invalid title, source or tags in lesson metadata: " ++ folder))

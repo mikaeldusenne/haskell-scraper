@@ -138,7 +138,9 @@ for commands, output files and the Arch Linux packages.
 
 For AmeriLingua, `amerilingua-index` adds metadata, the site's ordered Lesson
 Sequences and tag navigation using relative symlinks over the existing flat
-catalogue. See the [catalogue navigation guide](docs/AMERILINGUA-INDEX.md).
+catalogue. It also generates `index.html` at the catalogue root: open it directly
+in a browser to search courses and combine tag filters without an HTTP server.
+See the [catalogue navigation guide](docs/AMERILINGUA-INDEX.md).
 
 ## Resume and preserve your files
 

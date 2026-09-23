@@ -16,6 +16,9 @@ extra-source-files:
 - test/fixtures/**/*
 - test/smoke.py
 
+data-files:
+- assets/amerilingua-catalogue.html
+
 dependencies:
 - aeson >= 2 && < 3
 - base >= 4.18 && < 5
