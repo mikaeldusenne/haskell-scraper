@@ -6,6 +6,7 @@ import qualified AmeriLinguaContent
 import qualified AmeriLinguaIndex
 import Data.Version (showVersion)
 import Hafez (fs)
+import qualified MissaBrevis
 import Paths_haskellwebscrapper (version)
 import Scrapper (mainLoop)
 import System.Console.GetOpt
@@ -19,7 +20,7 @@ type Option = Config -> Either String Config
 options :: [OptDescr Option]
 options =
   [ Option ['o'] ["output"] (ReqArg (\value cfg -> Right cfg {download_folder = value}) "DIR") "Output directory (default: <site>_downloads)"
-  , Option [] ["base-url"] (ReqArg (\value cfg -> Right cfg {base = value}) "URL") "Starting URL (site default; AmeriLingua also accepts one lesson)"
+  , Option [] ["base-url"] (ReqArg (\value cfg -> Right cfg {base = value}) "URL") "Starting URL (site default; also accepts one lesson or Missa Brevis episode)"
   , Option [] ["delay-ms"] (ReqArg (number (\n cfg -> cfg {request_delay_ms = n})) "N") "Delay before each request (default: 1000)"
   , Option [] ["retries"] (ReqArg (number (\n cfg -> cfg {retry_count = n})) "N") "Extra attempts per failed stage (default: 2)"
   , Option [] ["timeout-seconds"] (ReqArg (number (\n cfg -> cfg {timeout_seconds = n})) "N") "HTTP response timeout (default: 30; must be positive)"
@@ -31,7 +32,7 @@ options =
       _ -> Left ("Expected a nonnegative integer, got: " ++ value)
 
 usage :: String
-usage = usageInfo "Usage: haskellwebscrapper-exe (hafez|amerilingua|amerilingua-content|amerilingua-index) [OPTIONS]\n       haskellwebscrapper-exe --help | --version\n\nhafez: English/Farsi poems. amerilingua: lesson PDFs and resource links.\namerilingua-content: objectives, transcript, vocabulary, audio and video URLs.\namerilingua-index: metadata, ordered sequences and tag navigation.\nAmeriLingua login: AMERILINGUA_LOGIN/PASS (see docs/AMERILINGUA.md).\nNo arguments prints help without crawling.\n" options
+usage = usageInfo "Usage: haskellwebscrapper-exe (hafez|amerilingua|amerilingua-content|amerilingua-index|missabrevis) [OPTIONS]\n       haskellwebscrapper-exe --help | --version\n\nhafez: English/Farsi poems. amerilingua: lesson PDFs and resource links.\namerilingua-content: objectives, transcript, vocabulary, audio and video URLs.\namerilingua-index: metadata, ordered sequences and tag navigation.\nmissabrevis: episode dialogue, stage directions and structured metadata.\nAmeriLingua login: AMERILINGUA_LOGIN/PASS (see docs/AMERILINGUA.md).\nNo arguments prints help without crawling.\n" options
 
 run :: Config -> (Config -> [Stage]) -> [String] -> IO ()
 run _ _ ["--help"] = putStrLn usage
@@ -57,4 +58,5 @@ main = do
     "amerilingua" : rest -> run AmeriLingua.config AmeriLingua.stages rest
     "amerilingua-content" : rest -> run AmeriLinguaContent.config AmeriLinguaContent.stages rest
     "amerilingua-index" : rest -> run AmeriLinguaIndex.config AmeriLinguaIndex.stages rest
+    "missabrevis" : rest -> run MissaBrevis.config MissaBrevis.stages rest
     _ -> die usage
