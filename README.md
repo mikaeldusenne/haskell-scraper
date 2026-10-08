@@ -1,8 +1,9 @@
 # Haskell Scraper
 
 A small Haskell library for **staged, resumable HTML scraping**, with adapters for
-English/Farsi ghazals at [Hafiz on Love](https://www.hafizonlove.com/divan/) and
-authenticated lesson downloads from [AmeriLingua](docs/AMERILINGUA.md).
+English/Farsi ghazals at [Hafiz on Love](https://www.hafizonlove.com/divan/),
+authenticated lesson downloads from [AmeriLingua](docs/AMERILINGUA.md), and
+Kaamelott episode references from [Missa Brevis](#missa-brevis).
 
 You describe a finite sequence of stages: an index yields section links, a section
 yields document links, and the final stage saves the content. The crawler runs
@@ -139,6 +140,36 @@ for commands, output files and the Arch Linux packages.
 For AmeriLingua, `amerilingua-index` adds metadata, the site's ordered Lesson
 Sequences and tag navigation using relative symlinks over the existing flat
 catalogue. See the [catalogue navigation guide](docs/AMERILINGUA-INDEX.md).
+
+## Missa Brevis
+
+The `missabrevis` adapter accepts the chronological episode index or a single
+`/codex/episodes/<slug>/` page through `--base-url`. It uses the same output,
+delay, retry and timeout options as the other adapters; its default output is
+`missabrevis_downloads`. Run `stack run -- missabrevis --help` for the CLI options.
+
+Index runs create folders such as `Livre_I/001-heat/`; a single episode writes
+directly into its output directory. Each episode produces UTF-8 files:
+
+- `dialogue.txt`: speech only, one nonempty utterance per line, without speaker
+  names, glossary annotations or stage directions, suitable for text alignment.
+- `transcript.txt`: readable dialogue with speakers, scene descriptions and directions.
+- `episode.json`: title, group, episode number and ordered lines with scene number,
+  type, speaker, full text, speech-only text and the site's phrase IDs.
+- `source.txt`: the original page URL; append `#<id>` to locate a JSON phrase.
+
+The adapter reads the site's speech-only HTML attributes instead of guessing which
+parentheses contain stage directions. Silent actions remain in the transcript and
+JSON but are omitted from `dialogue.txt`. These are reference texts, **not timed
+subtitles**: no timestamps are invented. Books V/VI use the site's long-episode
+numbering, and book IV has 99 entries in its index. The adapter does not infer DVD
+tomes or download linked videos and images.
+
+Rerunning resumes completed episodes. `--refresh` revisits them and uses the
+existing `.scraper-content-backups` mechanism before replacing changed generated
+content. An unexpected layout fails explicitly instead of saving an empty episode.
+The selectors were inspected on 2026-10-08; source content is not included in this
+repository and remains subject to its own rights and reuse conditions.
 
 ## Resume and preserve your files
 
